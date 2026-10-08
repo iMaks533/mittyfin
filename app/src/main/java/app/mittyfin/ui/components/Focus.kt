@@ -1,7 +1,10 @@
 package app.mittyfin.ui.components
 
 import android.content.pm.PackageManager
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -14,6 +17,11 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 
@@ -29,6 +37,19 @@ fun Modifier.focusHighlight(shape: Shape = RoundedCornerShape(12.dp), zoom: Floa
         .graphicsLayer { if (focused) { scaleX = zoom; scaleY = zoom } }
         .border(if (focused) 3.dp else 0.dp, if (focused) Color.White else Color.Transparent, shape)
 }
+
+/**
+ * Click plus a context menu: a long touch, OK held on the remote, or the remote's Menu key all call [onLongClick].
+ * Without [onLongClick] it is a plain clickable.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+fun Modifier.itemClickable(onClick: () -> Unit, onLongClick: (() -> Unit)? = null): Modifier =
+    if (onLongClick == null) clickable(onClick = onClick)
+    else onPreviewKeyEvent { e ->
+        if (e.key != Key.Menu) return@onPreviewKeyEvent false
+        if (e.type == KeyEventType.KeyUp) onLongClick()
+        true
+    }.combinedClickable(onClick = onClick, onLongClick = onLongClick)
 
 /** True on Android TV / Google TV / Shield (leanback devices): no touch, remote only. */
 @Composable

@@ -2,9 +2,9 @@ package app.mittyfin.ui.home
 
 import app.mittyfin.ui.components.OnReturn
 import app.mittyfin.ui.components.focusHighlight
+import app.mittyfin.ui.components.itemClickable
 import app.mittyfin.ui.components.RefreshBox
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -34,6 +34,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -49,6 +50,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.mittyfin.MittyfinApp
+import app.mittyfin.data.AppSettings
 import app.mittyfin.data.Item
 import app.mittyfin.ui.components.CardRow
 import app.mittyfin.ui.components.LibraryCard
@@ -67,6 +69,7 @@ import kotlinx.coroutines.launch
 
 class HomeViewModel : ViewModel() {
     private val jf = MittyfinApp.instance.jellyfin
+    private val prefs = MittyfinApp.instance.prefs
     var loading by mutableStateOf(true)
     var refreshing by mutableStateOf(false)
     var error by mutableStateOf<String?>(null)
@@ -75,8 +78,33 @@ class HomeViewModel : ViewModel() {
     var resume by mutableStateOf<List<Item>>(emptyList())
     var nextUp by mutableStateOf<List<Item>>(emptyList())
     var latest by mutableStateOf<List<Pair<Item, List<Item>>>>(emptyList())
+    /** What the user hid from the home screen (libraries, next-up suggestions). */
+    var settings by mutableStateOf(AppSettings())
+        private set
 
-    init { refresh() }
+    init {
+        refresh()
+        viewModelScope.launch { prefs.settingsFlow.collect { settings = it } }
+    }
+
+    /** Runs a long-press menu action; server changes are followed by a reload so every row agrees. */
+    fun perform(action: HomeAction, item: Item) {
+        viewModelScope.launch {
+            attempt {
+                when (action) {
+                    HomeAction.REMOVE_FROM_RESUME -> {
+                        jf.clearResumePosition(item.id)
+                        resume = resume.filter { it.id != item.id }
+                    }
+                    HomeAction.HIDE_FROM_NEXT_UP -> prefs.updateSettings { it.copy(hiddenNextUp = HomeMenu.hideNextUp(it.hiddenNextUp, item.id)) }
+                    HomeAction.HIDE_LIBRARY -> prefs.updateSettings { it.copy(hiddenViews = it.hiddenViews + item.id) }
+                    HomeAction.MARK_PLAYED, HomeAction.MARK_UNPLAYED -> { jf.setPlayed(item.id, action == HomeAction.MARK_PLAYED); refresh() }
+                    HomeAction.ADD_FAVORITE, HomeAction.REMOVE_FAVORITE -> { jf.setFavorite(item.id, action == HomeAction.ADD_FAVORITE); refresh() }
+                    HomeAction.OPEN, HomeAction.OPEN_SERIES -> Unit // navigation, handled by the screen
+                }
+            }.onFailure { error = it.message }
+        }
+    }
 
     fun refresh(pulled: Boolean = false) {
         if (refreshing) return
@@ -120,6 +148,20 @@ fun HomeScreen(
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         return
     }
+    var menu by remember { mutableStateOf<Pair<Item, HomeSection>?>(null) }
+    menu?.let { (item, section) ->
+        HomeItemMenu(item, section, onDismiss = { menu = null }) { action ->
+            menu = null
+            when (action) {
+                HomeAction.OPEN -> if (section == HomeSection.LIBRARY) onOpenLibrary(item) else onOpenItem(item)
+                HomeAction.OPEN_SERIES -> item.seriesId?.let { onOpenItem(Item(id = it, name = item.seriesName.orEmpty(), type = "Series")) }
+                else -> vm.perform(action, item)
+            }
+        }
+    }
+    val views = HomeMenu.visibleViews(vm.views, vm.settings.hiddenViews)
+    val nextUp = HomeMenu.visibleNextUp(vm.nextUp, vm.settings.hiddenNextUp)
+    val latest = HomeMenu.visibleLatest(vm.latest, vm.settings.hiddenViews)
     RefreshBox(vm.refreshing, { vm.refresh(pulled = true) }) {
     val tv = app.mittyfin.ui.components.isTv()
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = if (tv) 20.dp else 0.dp, bottom = 110.dp)) {
@@ -142,29 +184,29 @@ fun HomeScreen(
             }
         }
         vm.error?.let { e -> item { Text("Ошибка: $e", color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp)) } }
-        if (vm.featured.isNotEmpty()) item { HeroCarousel(vm.featured, onOpenItem) }
-        if (vm.views.isNotEmpty()) {
+        if (vm.featured.isNotEmpty()) item { HeroCarousel(vm.featured, onOpenItem, onLongClick = { menu = it to HomeSection.HERO }) }
+        if (views.isNotEmpty()) {
             item { SectionHeader("Медиатеки") }
-            item { CardRow(vm.views) { v -> LibraryCard(v, onClick = { onOpenLibrary(v) }) } }
+            item { CardRow(views) { v -> LibraryCard(v, onClick = { onOpenLibrary(v) }, onLongClick = { menu = v to HomeSection.LIBRARY }) } }
         }
         if (vm.resume.isNotEmpty()) {
             item { SectionHeader("Продолжить просмотр") }
-            item { CardRow(vm.resume) { WideCard(it, onClick = { onOpenItem(it) }) } }
+            item { CardRow(vm.resume) { WideCard(it, onClick = { onOpenItem(it) }, onLongClick = { menu = it to HomeSection.RESUME }) } }
         }
-        if (vm.nextUp.isNotEmpty()) {
+        if (nextUp.isNotEmpty()) {
             item { SectionHeader("Следующие серии") }
-            item { CardRow(vm.nextUp) { WideCard(it, onClick = { onOpenItem(it) }, showRemaining = false) } }
+            item { CardRow(nextUp) { WideCard(it, onClick = { onOpenItem(it) }, showRemaining = false, onLongClick = { menu = it to HomeSection.NEXT_UP }) } }
         }
-        items(vm.latest, key = { it.first.id }) { (view, list) ->
+        items(latest, key = { it.first.id }) { (view, list) ->
             SectionHeader(view.name, onMore = { onOpenLibrary(view) })
-            CardRow(list) { PosterCard(it, onClick = { onOpenItem(it) }) }
+            CardRow(list) { PosterCard(it, onClick = { onOpenItem(it) }, onLongClick = { menu = it to HomeSection.LATEST }) }
         }
     }
     }
 }
 
 @Composable
-private fun HeroCarousel(items: List<Item>, onOpenItem: (Item) -> Unit) {
+private fun HeroCarousel(items: List<Item>, onOpenItem: (Item) -> Unit, onLongClick: (Item) -> Unit) {
     val pager = rememberPagerState { items.size }
     HorizontalPager(
         state = pager,
@@ -177,7 +219,7 @@ private fun HeroCarousel(items: List<Item>, onOpenItem: (Item) -> Unit) {
         Box(
             Modifier.fillMaxWidth().height(200.dp).focusHighlight(RoundedCornerShape(26.dp), zoom = 1.02f)
                 .clip(RoundedCornerShape(26.dp)).background(FelColors.Surface)
-                .clickable { onOpenItem(item) }
+                .itemClickable(onClick = { onOpenItem(item) }, onLongClick = { onLongClick(item) })
         ) {
             AsyncImage(
                 model = backdropUrl(item), contentDescription = item.name,

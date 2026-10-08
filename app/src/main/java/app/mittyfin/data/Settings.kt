@@ -51,6 +51,11 @@ data class AppSettings(
     /** Audio delay per output route ("speaker", "bt:<name>", "wired", ...), ms; positive = sound later. */
     val audioDelayByRoute: Map<String, Int> = emptyMap(),
     val previewFrames: Boolean = true,
+    // Home
+    /** Libraries hidden from the home screen (the tile and its "latest" row), by id. */
+    val hiddenViews: Set<String> = emptySet(),
+    /** Next-up suggestions hidden from the home screen, by episode id, newest last. */
+    val hiddenNextUp: List<String> = emptyList(),
 )
 
 /** What a movie / series remembers between plays. Keyed by movie id or series id. */

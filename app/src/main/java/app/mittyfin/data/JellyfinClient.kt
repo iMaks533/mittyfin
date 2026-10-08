@@ -314,6 +314,10 @@ class JellyfinClient(private val http: OkHttpClient, private val prefs: Prefs) {
     suspend fun setPlayed(id: String, played: Boolean) =
         post("/UserPlayedItems/$id", query = mapOf("userId" to uid), delete = !played)
 
+    /** Drops an item from "continue watching" without marking it played: the resume position goes back to 0. */
+    suspend fun clearResumePosition(id: String) =
+        post("/UserItems/$id/UserData", body = """{"PlaybackPositionTicks":0}""", query = mapOf("userId" to uid))
+
     // --- urls ---
 
     fun imageUrl(itemId: String, type: String, tag: String? = null, maxWidth: Int = 600): String? {

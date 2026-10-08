@@ -107,6 +107,16 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
             item { Toggle("Убирать пометки для глухих", "[музыка], (стук), ИМЯ: — из текстовых субтитров", s.stripSdh) { v -> update { it.copy(stripSdh = v) } } }
             item { Toggle("libass для ASS/SSA", "Точное оформление аниме-субтитров (шрифты, позиции, эффекты)", s.libass) { v -> update { it.copy(libass = v) } } }
 
+            item { Section("Главная") }
+            item {
+                val hidden = s.hiddenViews.size + s.hiddenNextUp.size
+                Action(
+                    "Скрытое на главной",
+                    if (hidden == 0) "Ничего не скрыто. Меню карточки — долгое нажатие или зажатая OK на пульте" else "Скрыто: $hidden",
+                    "Показать всё", enabled = hidden > 0
+                ) { update { it.copy(hiddenViews = emptySet(), hiddenNextUp = emptyList()) } }
+            }
+
             item { Section("Аккаунт") }
             item {
                 Text("Сервер: ${app.jellyfin.session?.server ?: "-"}\nПользователь: ${app.jellyfin.session?.userName ?: "-"}",
@@ -142,6 +152,25 @@ private fun Toggle(title: String, subtitle: String?, checked: Boolean, modifier:
             subtitle?.let { Text(it, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         Switch(checked = checked, onCheckedChange = onChange)
+    }
+}
+
+@Composable
+private fun Action(title: String, subtitle: String?, button: String, enabled: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 8.dp).focusHighlight(RoundedCornerShape(12.dp), zoom = 1.01f)
+            .clip(RoundedCornerShape(12.dp)).clickable(enabled = enabled, onClick = onClick).padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, fontSize = 16.sp)
+            subtitle?.let { Text(it, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
+        if (enabled) {
+            Box(Modifier.clip(RoundedCornerShape(10.dp)).background(FelColors.Surface).padding(horizontal = 12.dp, vertical = 6.dp)) {
+                Text(button, fontSize = 14.sp, color = FelColors.Accent, maxLines = 1)
+            }
+        }
     }
 }
 

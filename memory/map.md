@@ -36,6 +36,11 @@ OkHttp 4.12 + kotlinx.serialization, DataStore, Coil 3. minSdk 29, target 36, т
   перекодирование — `POST /Items/{id}/PlaybackInfo` → HLS `TranscodingUrl`, остановка
   `DELETE /Videos/ActiveEncodings`; отрезки `/MediaSegments/{id}` (Intro/Recap/Outro/Preview);
   отчёты `/Sessions/Playing{,/Progress,/Stopped}` с `PlayMethod` DirectPlay/Transcode.
+- Меню карточек главной (`ui/home/HomeMenu.kt` — логика, `HomeItemMenu.kt` — диалог): долгий тап,
+  зажатый OK или Menu на пульте (`Modifier.itemClickable`). «Убрать из «Продолжить»» — на сервере
+  (`POST /UserItems/{id}/UserData` c `PlaybackPositionTicks=0`, без отметки «просмотрено»); скрытие
+  медиатек (`AppSettings.hiddenViews`: плитка + ряд «Новое») и «Следующих серий» (`hiddenNextUp`,
+  по id серии, до 200) — только в приложении; «Показать всё» в настройках → «Главная».
 - Память по тайтлу (`TitleMemory`): ключ = id сериала для серий, id фильма иначе;
   язык звука/субтитров ("" = выкл.), forced, сдвиг субтитров, скорость.
 - Задержка звука хранится по маршруту вывода (`AudioRoute`: speaker / wired / hdmi / `bt:<имя>`).
