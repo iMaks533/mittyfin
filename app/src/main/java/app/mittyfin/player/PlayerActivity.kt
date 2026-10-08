@@ -1,8 +1,20 @@
 package app.mittyfin.player
 
+import android.app.PendingIntent
+import android.app.PictureInPictureParams
+import android.app.RemoteAction
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.res.Configuration
+import android.graphics.drawable.Icon
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.util.Rational
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
 import android.util.Log
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -33,6 +45,7 @@ import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import app.mittyfin.MittyfinApp
+import app.mittyfin.R
 import app.mittyfin.data.Item
 import app.mittyfin.data.MediaStream
 import app.mittyfin.fel.GpuFelStatus
@@ -61,6 +74,9 @@ class PlayerUiState {
     /** SystemClock.elapsedRealtime() at which the sleep timer pauses playback, 0 = off. */
     var sleepAtMs by mutableLongStateOf(0L)
     var sleepLeftMs by mutableLongStateOf(0L)
+    var subtitleStyle by mutableStateOf(SubtitleStyle())
+    /** In the picture-in-picture window: only the video is drawn. */
+    var inPip by mutableStateOf(false)
 }
 
 @OptIn(UnstableApi::class)
@@ -74,6 +90,11 @@ class PlayerActivity : ComponentActivity() {
         const val EXTRA_SUBTITLE_INDEX = "subtitle_index"
         private const val TAG = "Mittyfin"
         private const val MAX_SUBTITLE_OFFSET_MS = 60_000L
+        private const val ACTION_PIP = "app.mittyfin.PIP_CONTROL"
+        private const val EXTRA_PIP_CMD = "cmd"
+        private const val PIP_REWIND = 1
+        private const val PIP_TOGGLE = 2
+        private const val PIP_FORWARD = 3
     }
 
     private val app get() = MittyfinApp.instance
@@ -115,8 +136,10 @@ class PlayerActivity : ComponentActivity() {
         }
 
         setContent { MittyfinTheme { PlayerScreen(this) } }
+        ContextCompat.registerReceiver(this, pipReceiver, IntentFilter(ACTION_PIP), ContextCompat.RECEIVER_NOT_EXPORTED)
 
         lifecycleScope.launch {
+            ui.subtitleStyle = SubtitleStyle.decode(app.prefs.subtitleStyle())
             // Process restored straight into the player (or a cold debug start): the saved session is not loaded yet.
             if (jf.session == null) jf.restore()
             val item = runCatching { jf.item(itemId) }.getOrElse {
@@ -186,7 +209,10 @@ class PlayerActivity : ComponentActivity() {
     }
 
     private val listener = object : Player.Listener {
-        override fun onIsPlayingChanged(isPlaying: Boolean) { ui.isPlaying = isPlaying }
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            ui.isPlaying = isPlaying
+            updatePipParams()
+        }
 
         override fun onPlaybackStateChanged(state: Int) {
             Log.i(TAG, "state $state at ${player?.currentPosition} ms, buffered ${player?.bufferedPosition} ms")
@@ -211,6 +237,7 @@ class PlayerActivity : ComponentActivity() {
 
         override fun onVideoSizeChanged(videoSize: VideoSize) {
             ui.videoSize = videoSize
+            updatePipParams()
             pinRefreshRate()
         }
 
@@ -271,6 +298,82 @@ class PlayerActivity : ComponentActivity() {
             b.setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, 0))
         }
         p.trackSelectionParameters = b.build()
+    }
+
+    fun setSubtitleStyle(style: SubtitleStyle) {
+        ui.subtitleStyle = style
+        lifecycleScope.launch { app.prefs.setSubtitleStyle(style.encode()) }
+    }
+
+    // --- picture in picture ---
+
+    private val pipReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val p = player ?: return
+            when (intent.getIntExtra(EXTRA_PIP_CMD, 0)) {
+                PIP_REWIND -> p.seekBack()
+                PIP_TOGGLE -> if (p.isPlaying) p.pause() else p.play()
+                PIP_FORWARD -> p.seekForward()
+            }
+        }
+    }
+
+    val pipSupported: Boolean
+        get() = packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE)
+
+    fun enterPip() {
+        if (!pipSupported) return
+        runCatching { enterPictureInPictureMode(pipParams()) }
+            .onSuccess { Log.i(TAG, "PiP entered: $it") }
+            .onFailure { Log.w(TAG, "PiP refused: ${it.message}") }
+    }
+
+    private fun pipAction(cmd: Int, icon: Int, title: String) = RemoteAction(
+        Icon.createWithResource(this, icon), title, title,
+        PendingIntent.getBroadcast(
+            this, cmd, Intent(ACTION_PIP).setPackage(packageName).putExtra(EXTRA_PIP_CMD, cmd),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+    )
+
+    private fun pipParams(): PictureInPictureParams {
+        val b = PictureInPictureParams.Builder()
+        val vs = ui.videoSize
+        if (vs.width > 0 && vs.height > 0) {
+            // The system accepts 1:2.39 .. 2.39:1; scope films are clamped to that.
+            val w = vs.width * vs.pixelWidthHeightRatio
+            val ratio = (w / vs.height).coerceIn(1f / 2.39f, 2.39f)
+            b.setAspectRatio(Rational((ratio * 1000).toInt(), 1000))
+        }
+        b.setActions(listOf(
+            pipAction(PIP_REWIND, R.drawable.ic_pip_rewind, "−10 с"),
+            if (ui.isPlaying) pipAction(PIP_TOGGLE, R.drawable.ic_pip_pause, "Пауза")
+            else pipAction(PIP_TOGGLE, R.drawable.ic_pip_play, "Воспроизвести"),
+            pipAction(PIP_FORWARD, R.drawable.ic_pip_forward, "+10 с"),
+        ))
+        if (Build.VERSION.SDK_INT >= 31) {
+            b.setAutoEnterEnabled(ui.isPlaying) // swipe home while a film plays -> PiP
+            b.setSeamlessResizeEnabled(true)
+        }
+        return b.build()
+    }
+
+    private fun updatePipParams() {
+        if (!pipSupported) return
+        runCatching { setPictureInPictureParams(pipParams()) }
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        // Android 12+ enters PiP by itself (setAutoEnterEnabled); older versions get it here.
+        if (Build.VERSION.SDK_INT < 31 && ui.isPlaying) enterPip()
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        ui.inPip = isInPictureInPictureMode
+        // Closed with the window's X (rather than expanded back): the activity is stopped, so leave the film.
+        if (!isInPictureInPictureMode && lifecycle.currentState == Lifecycle.State.CREATED) finish()
     }
 
     fun setSubtitleOffset(ms: Long) {
@@ -358,6 +461,7 @@ class PlayerActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        runCatching { unregisterReceiver(pipReceiver) }
         releasePlayer(report = true)
         window.attributes = window.attributes.apply { preferredDisplayModeId = 0 }
         super.onDestroy()

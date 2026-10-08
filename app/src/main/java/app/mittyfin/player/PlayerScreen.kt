@@ -31,6 +31,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.AvTimer
 import androidx.compose.material.icons.filled.Bedtime
+import androidx.compose.material.icons.filled.ClosedCaption
+import androidx.compose.material.icons.filled.PictureInPictureAlt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.FastRewind
@@ -48,6 +50,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -103,6 +106,7 @@ fun PlayerScreen(activity: PlayerActivity) {
     var menu by remember { mutableStateOf(false) }
     var sleepDialog by remember { mutableStateOf(false) }
     var offsetDialog by remember { mutableStateOf(false) }
+    var styleDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(controls, interaction, ui.isPlaying) {
         if (controls && ui.isPlaying) {
@@ -125,9 +129,13 @@ fun PlayerScreen(activity: PlayerActivity) {
             update = { view ->
                 if (view.player !== player) view.player = player
                 view.resizeMode = resizeMode
+                view.subtitleView?.let { ui.subtitleStyle.applyTo(it) }
             },
             modifier = Modifier.fillMaxSize()
         )
+        // Picture in picture: the small window shows only the video (its controls are the system's PiP actions).
+        if (ui.inPip) return@Box
+
         // Taps on the picture show / hide the controls (or, when locked, just the lock button).
         Box(Modifier.fillMaxSize().pointerInput(Unit) {
             detectTapGestures(onTap = { controls = !controls; interaction++ })
@@ -177,6 +185,11 @@ fun PlayerScreen(activity: PlayerActivity) {
                     onClick = { menu = false; sleepDialog = true }
                 )
                 DropdownMenuItem(
+                    leadingIcon = { Icon(Icons.Default.ClosedCaption, null) },
+                    text = { Text("Вид субтитров") },
+                    onClick = { menu = false; styleDialog = true }
+                )
+                DropdownMenuItem(
                     leadingIcon = { Icon(Icons.Default.AvTimer, null) },
                     text = { Text("Сдвиг субтитров: ${subtitleOffsetLabel(ui.subtitleOffsetMs)}") },
                     onClick = { menu = false; offsetDialog = true }
@@ -211,6 +224,59 @@ fun PlayerScreen(activity: PlayerActivity) {
         trackDialog?.let { type -> TrackDialog(activity, type) { trackDialog = null } }
         if (sleepDialog) SleepTimerDialog(activity) { sleepDialog = false }
         if (offsetDialog) SubtitleOffsetDialog(activity) { offsetDialog = false }
+        if (styleDialog) SubtitleStyleDialog(activity) { styleDialog = false }
+    }
+}
+
+@Composable
+private fun SubtitleStyleDialog(activity: PlayerActivity, onDismiss: () -> Unit) {
+    val style = activity.ui.subtitleStyle
+    fun set(s: SubtitleStyle) = activity.setSubtitleStyle(s)
+    // No dimming: the subtitles on the video behind are the preview.
+    Dialog(onDismissRequest = onDismiss, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+        (androidx.compose.ui.platform.LocalView.current.parent as? androidx.compose.ui.window.DialogWindowProvider)
+            ?.window?.setDimAmount(0f)
+        Column(
+            Modifier.padding(horizontal = 24.dp).clip(RoundedCornerShape(18.dp)).background(FelColors.SurfaceHigh.copy(alpha = 0.94f))
+                .padding(horizontal = 20.dp, vertical = 14.dp).widthIn(max = 640.dp).verticalScroll(rememberScrollState())
+        ) {
+            Text("Вид субтитров", color = Color.White, fontSize = 19.sp, modifier = Modifier.padding(bottom = 6.dp))
+            ChoiceRow("Размер", SubtitleStyle.Size.entries, style.size, { it.label }) { set(style.copy(size = it)) }
+            ChoiceRow("Контур", SubtitleStyle.Edge.entries, style.edge, { it.label }) { set(style.copy(edge = it)) }
+            ChoiceRow("Цвет", SubtitleStyle.TextColor.entries, style.color, { it.label }) { set(style.copy(color = it)) }
+            ChoiceRow("Положение", SubtitleStyle.Position.entries, style.position, { it.label }) { set(style.copy(position = it)) }
+            SwitchRow("Жирный шрифт", style.bold) { set(style.copy(bold = it)) }
+            SwitchRow("Стили из файла (ASS, VTT)", style.embeddedStyles) { set(style.copy(embeddedStyles = it)) }
+            Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.End) {
+                Text("По умолчанию", color = FelColors.Accent, modifier = Modifier.clickable { set(SubtitleStyle()) }.padding(8.dp))
+                Spacer(Modifier.width(16.dp))
+                Text("Готово", color = FelColors.Accent, modifier = Modifier.clickable(onClick = onDismiss).padding(8.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun <T> ChoiceRow(title: String, options: List<T>, selected: T, label: (T) -> String, onPick: (T) -> Unit) {
+    Column(Modifier.padding(vertical = 6.dp)) {
+        Text(title, color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp, modifier = Modifier.padding(bottom = 6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            options.forEach { o ->
+                val on = o == selected
+                Box(
+                    Modifier.clip(RoundedCornerShape(10.dp)).background(if (on) FelColors.Accent else Glass)
+                        .clickable { onPick(o) }.padding(horizontal = 12.dp, vertical = 8.dp)
+                ) { Text(label(o), color = if (on) Color(0xFF0B1220) else Color.White, fontSize = 14.sp) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SwitchRow(title: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable { onChange(!checked) }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(title, color = Color.White, fontSize = 15.sp, modifier = Modifier.weight(1f))
+        Switch(checked = checked, onCheckedChange = onChange)
     }
 }
 
@@ -309,6 +375,10 @@ private fun Controls(
                     Icon(Icons.Default.Bedtime, "Таймер сна", tint = Color.White, modifier = Modifier.size(18.dp))
                     Text(SleepTimer.label(ui.sleepLeftMs), color = Color.White, fontSize = 14.sp, modifier = Modifier.padding(start = 6.dp))
                 }
+                Spacer(Modifier.width(10.dp))
+            }
+            if (activity.pipSupported) {
+                RoundButton(Icons.Default.PictureInPictureAlt, "Картинка в картинке") { activity.enterPip() }
                 Spacer(Modifier.width(10.dp))
             }
             RoundButton(Icons.Default.AspectRatio, "Размер", onClick = onResize)

@@ -22,6 +22,7 @@ class Prefs(private val context: Context) {
         val deviceId = stringPreferencesKey("device_id")
         val gpuFel = booleanPreferencesKey("gpu_fel")
         val lastServer = stringPreferencesKey("last_server")
+        val subtitleStyle = stringPreferencesKey("subtitle_style")
     }
 
     suspend fun session(): Session? {
@@ -64,5 +65,12 @@ class Prefs(private val context: Context) {
 
     suspend fun setGpuFelEnabled(enabled: Boolean) {
         context.store.edit { it[K.gpuFel] = enabled }
+    }
+
+    /** Encoded [app.mittyfin.player.SubtitleStyle], null = defaults. */
+    suspend fun subtitleStyle(): String? = context.store.data.first()[K.subtitleStyle]
+
+    suspend fun setSubtitleStyle(encoded: String) {
+        context.store.edit { it[K.subtitleStyle] = encoded }
     }
 }
