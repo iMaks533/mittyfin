@@ -43,9 +43,10 @@ OkHttp 4.12 + kotlinx.serialization, DataStore, Coil 3. minSdk 29, target 36, т
 
 ## Инварианты и грабли
 
-- **GPU FEL возможен только при**: HEVC-декодер отдаёт P010 (цвет 54) и ≥2 сессии 4K,
-  EGL-окно RGBA1010102 + `EGL_EXT_gl_colorspace_bt2020_pq`. Shield (Android 11): декодер
-  только 8 бит, HDR-окна нет → недоступен (это железо, не код).
+- **GPU FEL возможен только при**: HEVC-декодер отдаёт P010 (цвет 54) и ≥2 сессии 4K.
+  HDR-вывод — если экран заявляет HDR10 и есть EGL RGBA1010102 + `EGL_EXT_gl_colorspace_bt2020_pq`;
+  иначе `FelGlComposer` выводит RGBA8888 с тон-маппингом в SDR (в HUD «SDR out»).
+  Shield (Android 11): декодер только 8 бит → недоступен (это железо, не код).
 - **c2.mtk.hevc.decoder** (Dimensity): EL-кадры выходят почти в порядке декодирования →
   EL ищется по PTS (`elOut` — TreeMap). На HDR-SEI и повторных VPS/SPS/PPS перед каждым IDR
   делает `configUpdate` и теряет кадры конвейера (лог `NO_OUTPUT work returned`) → splitter
