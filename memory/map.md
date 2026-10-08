@@ -26,6 +26,11 @@ OkHttp 4.12 + kotlinx.serialization, DataStore, Coil 3. minSdk 29, target 36, т
 
 ## Контракты
 
+- Версия: тег `vX.Y.Z` → versionName (`X.Y.Z`, после тега `X.Y.Z-N-gSHA`, `-dirty`),
+  versionCode = `git rev-list --count HEAD`; логика в `buildSrc/src/main/kotlin/AppVersion.kt`.
+  `BuildConfig.VERSION_NAME` уходит в `Version=` заголовка Jellyfin и в низ настроек.
+  Релиз подписан своим ключом (`C:\Android\keys`), debug — debug-ключом: поверх друг друга не ставятся.
+
 - Jellyfin: заголовок `Authorization: MediaBrowser Client="Mittyfin", Device, DeviceId, Version, Token`;
   поток `/Videos/{id}/stream?static=true&mediaSourceId=` — токен в заголовке (не в URL),
   перекодирование — `POST /Items/{id}/PlaybackInfo` → HLS `TranscodingUrl`, остановка

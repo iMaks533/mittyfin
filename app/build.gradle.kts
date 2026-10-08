@@ -5,6 +5,12 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
+fun git(vararg args: String): String? {
+    val exec = providers.exec { commandLine("git", *args); isIgnoreExitValue = true }
+    return if (exec.result.get().exitValue == 0) exec.standardOutput.asText.get() else null
+}
+val appVersion = AppVersion.fromGit(git("describe", "--tags", "--match", "v*", "--dirty"), git("rev-list", "--count", "HEAD"))
+
 android {
     namespace = "app.mittyfin"
     compileSdk = 36
@@ -13,21 +19,44 @@ android {
         applicationId = "app.mittyfin"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = appVersion.code
+        versionName = appVersion.name
         ndk { abiFilters += "arm64-v8a" }
+    }
+
+    signingConfigs {
+        // The release key lives outside the repo; its path and passwords come from ~/.gradle/gradle.properties.
+        val storePath = providers.gradleProperty("mittyfin.storeFile").orNull
+        if (storePath != null) create("release") {
+            storeFile = file(storePath)
+            storePassword = providers.gradleProperty("mittyfin.storePassword").get()
+            keyAlias = providers.gradleProperty("mittyfin.keyAlias").get()
+            keyPassword = providers.gradleProperty("mittyfin.keyPassword").get()
+        }
     }
 
     buildTypes {
         debug { isMinifyEnabled = false }
-        release { isMinifyEnabled = false }
+        release {
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release")
+        }
+    }
+
+    applicationVariants.all {
+        if (buildType.name == "release") outputs.all {
+            (this as com.android.build.gradle.internal.api.BaseVariantOutputImpl).outputFileName = "Mittyfin-$versionName.apk"
+        }
     }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
     packaging { resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" } }
 }
 

@@ -33,6 +33,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.mittyfin.BuildConfig
 import app.mittyfin.MittyfinApp
 import app.mittyfin.data.AppSettings
 import app.mittyfin.data.BufferProfile
@@ -115,6 +116,10 @@ fun SettingsScreen(onBack: () -> Unit, onLoggedOut: () -> Unit) {
                 Text("Выйти", color = Color(0xFFFF8A8A), fontSize = 16.sp,
                     modifier = Modifier.padding(horizontal = 12.dp).focusHighlight(RoundedCornerShape(10.dp))
                         .clickable { scope.launch { app.jellyfin.logout(); onLoggedOut() } }.padding(horizontal = 8.dp, vertical = 12.dp))
+            }
+            item {
+                Text("Версия ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp))
             }
         }
     }

@@ -1,6 +1,7 @@
 package app.mittyfin.data
 
 import android.os.Build
+import app.mittyfin.BuildConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -60,7 +61,7 @@ class JellyfinClient(private val http: OkHttpClient, private val prefs: Prefs) {
     private fun authHeader(token: String?): String = buildString {
         append("MediaBrowser Client=\"Mittyfin\", Device=\"")
         append(Build.MODEL.replace("\"", ""))
-        append("\", DeviceId=\"").append(deviceId).append("\", Version=\"0.1.0\"")
+        append("\", DeviceId=\"").append(deviceId).append("\", Version=\"").append(BuildConfig.VERSION_NAME).append('"')
         if (token != null) append(", Token=\"").append(token).append('"')
     }
 

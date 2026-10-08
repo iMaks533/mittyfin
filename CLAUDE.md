@@ -18,8 +18,13 @@ profile 7 FEL, собираемый на GPU из двух аппаратных 
 - Путь проекта только латиницей (AGP не собирает из кириллического пути).
 - `JAVA_HOME=C:/Android/jdk17`, SDK `C:/Android/sdk`, из корня:
   - сборка: `./gradlew.bat :app:assembleDebug -x lintVitalAnalyzeRelease`
-  - тесты: `./gradlew.bat :fel:testDebugUnitTest :app:testDebugUnitTest`
+  - тесты: `./gradlew.bat :fel:testDebugUnitTest :app:testDebugUnitTest` и `./gradlew.bat -p buildSrc test`
   - APK: `app/build/outputs/apk/debug/app-debug.apk`
+  - релиз: коммит → тег `vX.Y.Z` на нём → `./gradlew.bat :app:assembleRelease -x lintVitalAnalyzeRelease`
+    → `app/build/outputs/apk/release/Mittyfin-X.Y.Z.apk`. Версия и versionCode берутся из git
+    (`buildSrc/.../AppVersion.kt`); `-dirty` в имени = собрано с незакоммиченными правками.
+  - Ключ подписи `C:\Android\keys\mittyfin-release.jks`, пароли в `~/.gradle/gradle.properties`
+    (`mittyfin.*`) — в репозиторий не класть. Без ключа обновление поверх не встанет.
 - Долгие сборки с `timeout` — проверять время APK: оборванная по таймауту сборка молча
   оставляет старый файл.
 - adb: `C:/Android/sdk/platform-tools/adb.exe`. Телефон `3B15A300AGJ00000` (USB), Shield
