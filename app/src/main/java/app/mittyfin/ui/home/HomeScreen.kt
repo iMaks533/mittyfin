@@ -59,7 +59,9 @@ import app.mittyfin.ui.components.formatRating
 import app.mittyfin.ui.components.logoUrl
 import app.mittyfin.ui.theme.FelColors
 import coil3.compose.AsyncImage
+import app.mittyfin.data.attempt
 import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
 class HomeViewModel : ViewModel() {
@@ -80,7 +82,9 @@ class HomeViewModel : ViewModel() {
         refreshing = pulled
         viewModelScope.launch {
             error = null
-            runCatching {
+            // coroutineScope: a failing request fails this block (shown as an error) instead of cancelling the
+            // view model's launch with an uncaught exception, which crashed the app.
+            attempt { coroutineScope {
                 val f = async { jf.featured() }
                 val v = async { jf.views() }
                 val r = async { jf.resume() }
@@ -91,10 +95,10 @@ class HomeViewModel : ViewModel() {
                 nextUp = n.await()
                 latest = views
                     .filter { it.collectionType in setOf("movies", "tvshows", null) && it.collectionType != "boxsets" }
-                    .map { view -> async { view to runCatching { jf.latest(view.id) }.getOrDefault(emptyList()) } }
+                    .map { view -> async { view to attempt { jf.latest(view.id) }.getOrDefault(emptyList()) } }
                     .map { it.await() }
                     .filter { it.second.isNotEmpty() }
-            }.onFailure { error = it.message }
+            } }.onFailure { error = it.message }
             loading = false
             refreshing = false
         }

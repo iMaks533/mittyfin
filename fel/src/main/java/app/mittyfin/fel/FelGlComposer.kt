@@ -636,7 +636,17 @@ internal class FelGlComposer(
             next = p
         }
         val waiting = surface
-        if (windowSurface == EGL14.EGL_NO_SURFACE && waiting != null && waiting.isValid) attachSurface(waiting)
+        if (windowSurface == EGL14.EGL_NO_SURFACE && waiting != null && waiting.isValid) {
+            // Re-attach after a swap-time loss. A Surface whose BufferQueue was abandoned still reports isValid
+            // until its owner releases it: a failure here is not a composition error, just wait for setSurface().
+            try {
+                attachSurface(waiting)
+            } catch (e: IllegalStateException) {
+                Log.w(TAG, "window re-attach failed (${e.message}); waiting for a new surface")
+                destroyWindowSurface()
+                surface = null
+            }
+        }
         val hasWindow = windowSurface != EGL14.EGL_NO_SURFACE
         if (next != null) {
             current?.let { retire(it) }
@@ -670,6 +680,7 @@ internal class FelGlComposer(
             if (e == EGL14.EGL_BAD_SURFACE || e == EGL14.EGL_BAD_NATIVE_WINDOW) {
                 Log.w(TAG, "eglSwapBuffers: surface lost (0x${Integer.toHexString(e)})")
                 destroyWindowSurface()
+                surface = null // abandoned: the renderer hands over the next one (MSG_SET_VIDEO_OUTPUT)
                 return
             }
             error("eglSwapBuffers failed: 0x${Integer.toHexString(e)}")
@@ -748,7 +759,10 @@ internal class FelGlComposer(
 
     private fun destroyWindowSurface() {
         if (windowSurface == EGL14.EGL_NO_SURFACE) return
-        EGL14.eglMakeCurrent(display, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
+        // Keep the present context current without a surface where possible: frames retired while there is no
+        // window still have to delete their fences and fence their slot (see retire()).
+        val keep = if ("EGL_KHR_surfaceless_context" in eglExtensions) presentContext else EGL14.EGL_NO_CONTEXT
+        EGL14.eglMakeCurrent(display, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, keep)
         EGL14.eglDestroySurface(display, windowSurface)
         windowSurface = EGL14.EGL_NO_SURFACE
     }

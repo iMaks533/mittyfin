@@ -64,6 +64,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.mittyfin.MittyfinApp
+import app.mittyfin.data.attempt
 import app.mittyfin.ui.components.OnReturn
 import app.mittyfin.ui.components.RefreshBox
 import app.mittyfin.data.Item
@@ -109,7 +110,7 @@ class DetailsViewModel(private val itemId: String) : ViewModel() {
         if (refreshing) return
         refreshing = pulled
         viewModelScope.launch {
-            runCatching {
+            attempt {
                 val it = jf.item(itemId)
                 item = it
                 val ms = it.mediaSources.firstOrNull()
@@ -121,23 +122,30 @@ class DetailsViewModel(private val itemId: String) : ViewModel() {
                         ?: seasons.firstOrNull { s -> s.userData?.played == false } ?: seasons.firstOrNull()
                     pick?.let { s -> selectSeason(s) }
                 }
-                similar = runCatching { jf.similar(itemId) }.getOrDefault(emptyList())
+                similar = attempt { jf.similar(itemId) }.getOrDefault(emptyList())
             }.onFailure { error = it.message }
             refreshing = false
         }
     }
 
+    private var seasonJob: kotlinx.coroutines.Job? = null
+
     fun selectSeason(season: Item) {
         selectedSeason = season
         val series = item ?: return
-        viewModelScope.launch { episodes = runCatching { jf.episodes(series.id, season.id) }.getOrDefault(emptyList()) }
+        // Quick taps between seasons: only the last one's episodes may land.
+        seasonJob?.cancel()
+        seasonJob = viewModelScope.launch {
+            val list = attempt { jf.episodes(series.id, season.id) }.getOrDefault(emptyList())
+            if (selectedSeason?.id == season.id) episodes = list
+        }
     }
 
     fun toggleFavorite() {
         val it = item ?: return
         val fav = !(it.userData?.isFavorite ?: false)
         viewModelScope.launch {
-            runCatching { jf.setFavorite(it.id, fav) }.onSuccess { load() }
+            attempt { jf.setFavorite(it.id, fav) }.onSuccess { load() }
         }
     }
 
@@ -145,7 +153,7 @@ class DetailsViewModel(private val itemId: String) : ViewModel() {
         val it = item ?: return
         val played = !(it.userData?.played ?: false)
         viewModelScope.launch {
-            runCatching { jf.setPlayed(it.id, played) }.onSuccess { load() }
+            attempt { jf.setPlayed(it.id, played) }.onSuccess { load() }
         }
     }
 

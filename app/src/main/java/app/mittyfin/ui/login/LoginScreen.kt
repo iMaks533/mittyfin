@@ -30,6 +30,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import app.mittyfin.MittyfinApp
+import app.mittyfin.data.attempt
 import kotlinx.coroutines.launch
 
 @Composable
@@ -74,7 +75,7 @@ fun LoginScreen(onSignedIn: () -> Unit) {
                 busy = true
                 error = null
                 scope.launch {
-                    runCatching { app.jellyfin.login(server, user.trim(), password) }
+                    attempt { app.jellyfin.login(server, user.trim(), password) }
                         .onSuccess { onSignedIn() }
                         .onFailure { error = "Не удалось войти: ${it.message}" }
                     busy = false

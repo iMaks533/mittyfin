@@ -37,6 +37,7 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.TrackSelectionParameters
 import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
@@ -48,6 +49,7 @@ import app.mittyfin.MittyfinApp
 import app.mittyfin.R
 import app.mittyfin.data.Item
 import app.mittyfin.data.MediaStream
+import app.mittyfin.data.attempt
 import app.mittyfin.fel.GpuFelStatus
 import app.mittyfin.fel.GpuFelVideoRenderer
 import app.mittyfin.ui.theme.MittyfinTheme
@@ -95,6 +97,11 @@ class PlayerActivity : ComponentActivity() {
         private const val PIP_REWIND = 1
         private const val PIP_TOGGLE = 2
         private const val PIP_FORWARD = 3
+        private const val STATE_POSITION = "position"
+        private const val STATE_FELL_BACK = "gpu_fel_fell_back"
+        private const val STATE_TRACKS = "tracks"
+        private const val STATE_SPEED = "speed"
+        private const val STATE_SUB_OFFSET = "subtitle_offset"
     }
 
     private val app get() = MittyfinApp.instance
@@ -114,6 +121,10 @@ class PlayerActivity : ComponentActivity() {
     private var progressJob: Job? = null
     private val subtitleDelay = SubtitleDelay()
     private var pinnedForFps = 0f
+    private var progressReport: Job? = null
+
+    /** Player state carried over when the player is rebuilt (GPU FEL fallback, restored activity). */
+    private class Carry(val playWhenReady: Boolean, val speed: Float, val tracks: TrackSelectionParameters?)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -121,7 +132,19 @@ class PlayerActivity : ComponentActivity() {
         mediaSourceId = intent.getStringExtra(EXTRA_MEDIA_SOURCE_ID) ?: return finish()
         audioIndex = intent.getIntExtra(EXTRA_AUDIO_INDEX, Int.MIN_VALUE).takeIf { it != Int.MIN_VALUE }
         subtitleIndex = intent.getIntExtra(EXTRA_SUBTITLE_INDEX, Int.MIN_VALUE).takeIf { it != Int.MIN_VALUE }
-        val startMs = intent.getLongExtra(EXTRA_START_MS, 0L)
+        // Restored after process death / an unlisted config change: continue where it was, not at the launch position.
+        val startMs = savedInstanceState?.getLong(STATE_POSITION, -1L)?.takeIf { it >= 0 } ?: intent.getLongExtra(EXTRA_START_MS, 0L)
+        gpuFelFellBack = savedInstanceState?.getBoolean(STATE_FELL_BACK) ?: false
+        val carry = savedInstanceState?.let { b ->
+            Carry(
+                playWhenReady = true,
+                speed = b.getFloat(STATE_SPEED, 1f),
+                tracks = b.getBundle(STATE_TRACKS)?.let { TrackSelectionParameters.fromBundle(it) },
+            )
+        }
+        savedInstanceState?.getLong(STATE_SUB_OFFSET)?.let { setSubtitleOffset(it) }
+        GpuFelStatus.lastFallbackReason = null
+        GpuFelStatus.streamElType = null
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         if (Build.VERSION.SDK_INT >= 30) {
@@ -140,22 +163,20 @@ class PlayerActivity : ComponentActivity() {
 
         lifecycleScope.launch {
             ui.subtitleStyle = SubtitleStyle.decode(app.prefs.subtitleStyle())
-            // Process restored straight into the player (or a cold debug start): the saved session is not loaded yet.
-            if (jf.session == null) jf.restore()
-            val item = runCatching { jf.item(itemId) }.getOrElse {
+            val item = attempt { jf.item(itemId) }.getOrElse {
                 ui.error = "Не удалось загрузить: ${it.message}"
                 return@launch
             }
             ui.item = item
-            startPlayback(startMs)
+            startPlayback(startMs, carry)
         }
     }
 
-    private suspend fun startPlayback(startMs: Long) {
-        GpuFelStatus.lastFallbackReason = null
-        GpuFelStatus.streamElType = null
+    private suspend fun startPlayback(startMs: Long, carry: Carry? = null) {
         val gpuFel = app.prefs.gpuFelEnabled() && !gpuFelFellBack && !intent.getBooleanExtra("debug_no_gpufel", false)
-        val dataSource = DefaultDataSource.Factory(this, OkHttpDataSource.Factory(app.http))
+        // The token goes in a header, not in the stream / subtitle URLs.
+        val http = OkHttpDataSource.Factory(app.http).setDefaultRequestProperties(mapOf("Authorization" to jf.authorization()))
+        val dataSource = DefaultDataSource.Factory(this, http)
         val p = ExoPlayer.Builder(this, FelRenderersFactory(this, gpuFel, subtitleDelay))
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSource))
             .setSeekBackIncrementMs(10_000)
@@ -164,6 +185,7 @@ class PlayerActivity : ComponentActivity() {
                 AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),
                 /* handleAudioFocus= */ true
             )
+            .setHandleAudioBecomingNoisy(true) // headphones unplugged / Bluetooth gone: pause, not the speaker
             .build()
         p.addListener(listener)
         p.addAnalyticsListener(object : androidx.media3.exoplayer.analytics.AnalyticsListener {
@@ -176,10 +198,18 @@ class PlayerActivity : ComponentActivity() {
             p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
         }
-        tracksApplied = false
+        if (carry?.tracks != null) {
+            // Rebuilt player: keep what the user picked in the player rather than re-mapping the launch indices.
+            p.trackSelectionParameters = carry.tracks
+            tracksApplied = true
+        } else {
+            tracksApplied = false
+        }
+        carry?.let { p.setPlaybackSpeed(it.speed); ui.speed = it.speed }
         p.setMediaItem(buildMediaItem(), startMs)
         p.prepare()
-        p.playWhenReady = true
+        // Never start by itself in the background (fallback while stopped, or a paused film).
+        p.playWhenReady = (carry?.playWhenReady ?: true) && lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
         player = p
         startProgressLoop()
     }
@@ -249,10 +279,12 @@ class PlayerActivity : ComponentActivity() {
             if (!gpuFelFellBack && GpuFelVideoRenderer.isFallbackError(error)) {
                 // The GPU FEL renderer refused this stream: same title, same position, without it.
                 gpuFelFellBack = true
-                val position = player?.currentPosition ?: 0L
+                val old = player
+                val position = old?.currentPosition ?: 0L
+                val carry = old?.let { Carry(it.playWhenReady, it.playbackParameters.speed, it.trackSelectionParameters) }
                 Log.i(TAG, "GPU FEL fallback: ${error.cause?.message}")
                 releasePlayer(report = false)
-                lifecycleScope.launch { startPlayback(position) }
+                lifecycleScope.launch { startPlayback(position, carry) }
                 return
             }
             ui.error = "Ошибка воспроизведения: ${error.errorCodeName}\n${error.cause?.message ?: error.message}"
@@ -431,8 +463,11 @@ class PlayerActivity : ComponentActivity() {
                 if (p.duration > 0) ui.durationMs = p.duration
                 ui.gpuFelPath = GpuFelStatus.liveSummary != null
                 tickSleepTimer(p)
-                if (++tick % 40 == 0 && reported) {
-                    jf.reportProgress(itemId, mediaSourceId, playSessionId, p.currentPosition, !p.isPlaying)
+                if (++tick % 40 == 0 && reported && progressReport?.isActive != true) {
+                    // Separate coroutine: a slow server must not freeze the clock, seek bar or sleep timer.
+                    val pos = p.currentPosition
+                    val paused = !p.isPlaying
+                    progressReport = launch { jf.reportProgress(itemId, mediaSourceId, playSessionId, pos, paused) }
                 }
                 delay(250)
             }
@@ -449,6 +484,17 @@ class PlayerActivity : ComponentActivity() {
         if (report && reported) {
             app.applicationScopeLaunch { jf.reportStopped(itemId, mediaSourceId, playSessionId, position) }
         }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        player?.let { p ->
+            outState.putLong(STATE_POSITION, p.currentPosition)
+            outState.putFloat(STATE_SPEED, p.playbackParameters.speed)
+            outState.putBundle(STATE_TRACKS, p.trackSelectionParameters.toBundle())
+        }
+        outState.putBoolean(STATE_FELL_BACK, gpuFelFellBack)
+        outState.putLong(STATE_SUB_OFFSET, ui.subtitleOffsetMs)
     }
 
     override fun onStop() {

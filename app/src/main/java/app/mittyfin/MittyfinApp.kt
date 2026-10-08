@@ -12,6 +12,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
@@ -38,6 +39,9 @@ class MittyfinApp : Application(), SingletonImageLoader.Factory {
             .readTimeout(30, TimeUnit.SECONDS)
             .build()
         jellyfin = JellyfinClient(http, prefs)
+        // Load the saved session before any activity: after process death Android restores the last screen
+        // (Home, Details, the player) directly, without going through the loading route. A tiny local file.
+        runBlocking(Dispatchers.IO) { jellyfin.restore() }
     }
 
     override fun newImageLoader(context: PlatformContext): ImageLoader =

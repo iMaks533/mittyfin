@@ -1,6 +1,7 @@
 package app.mittyfin.data
 
 import android.os.Build
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -15,6 +16,18 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 
 class JellyfinException(message: String, val code: Int = 0) : IOException(message)
+
+/**
+ * runCatching for suspend calls that keeps coroutine cancellation working: a cancelled call (e.g. the previous
+ * search superseded by collectLatest) rethrows instead of being reported as a failure.
+ */
+inline fun <T> attempt(block: () -> T): Result<T> = try {
+    Result.success(block())
+} catch (e: CancellationException) {
+    throw e
+} catch (e: Throwable) {
+    Result.failure(e)
+}
 
 /** Minimal Jellyfin REST client (10.9+ endpoints) over OkHttp. */
 class JellyfinClient(private val http: OkHttpClient, private val prefs: Prefs) {
@@ -32,10 +45,15 @@ class JellyfinClient(private val http: OkHttpClient, private val prefs: Prefs) {
         return session
     }
 
+    /** Revokes the token on the server (best effort), then forgets it locally. */
     suspend fun logout() {
+        attempt { post("/Sessions/Logout") }
         session = null
         prefs.clearSession()
     }
+
+    /** Authorization header value for the signed-in user (also sent by the player's data source). */
+    fun authorization(): String = authHeader(session?.token)
 
     private fun authHeader(token: String?): String = buildString {
         append("MediaBrowser Client=\"Mittyfin\", Device=\"")
@@ -44,13 +62,24 @@ class JellyfinClient(private val http: OkHttpClient, private val prefs: Prefs) {
         if (token != null) append(", Token=\"").append(token).append('"')
     }
 
-    /** "http://host:8096" form, without a trailing slash; adds http:// and the default port when missing. */
-    fun normalizeServer(input: String): String {
-        var s = input.trim().trimEnd('/')
-        if (!s.startsWith("http://") && !s.startsWith("https://")) s = "http://$s"
-        val url = s.toHttpUrl()
-        val hasPort = Regex("^https?://[^/]+:\\d+").containsMatchIn(s)
-        return if (hasPort || url.scheme == "https") s else "$s:8096"
+    /**
+     * Server base URL without a trailing slash. Adds http:// when no scheme is typed, and Jellyfin's default port
+     * 8096 only for a bare host ("192.168.1.5", "nas"): an explicit port, https, or a path (reverse proxy such as
+     * "http://nas/jellyfin") are kept as typed.
+     */
+    fun normalizeServer(input: String): String = Companion.normalizeServer(input)
+
+    companion object {
+        fun normalizeServer(input: String): String {
+            var s = input.trim().trimEnd('/')
+            if (!s.startsWith("http://", ignoreCase = true) && !s.startsWith("https://", ignoreCase = true)) s = "http://$s"
+            val url = s.toHttpUrl()
+            val hostPart = s.substringAfter("://").substringBefore('/')
+            val explicitPort = hostPart.substringAfterLast(']').contains(':')
+            val hasPath = url.encodedPath != "/"
+            val base = s.substringBefore('?').trimEnd('/')
+            return if (explicitPort || hasPath || url.scheme == "https") base else "$base:8096"
+        }
     }
 
     private fun url(server: String, path: String, query: Map<String, Any?> = emptyMap()): HttpUrl {
@@ -67,14 +96,17 @@ class JellyfinClient(private val http: OkHttpClient, private val prefs: Prefs) {
         }
     }
 
+    /** The session, restored from the store when this process has not loaded it yet (process death, cold start). */
+    private suspend fun requireSession(): Session = session ?: restore() ?: throw JellyfinException("not signed in")
+
     private suspend inline fun <reified T> get(path: String, query: Map<String, Any?> = emptyMap()): T {
-        val s = session ?: throw JellyfinException("not signed in")
+        val s = requireSession()
         val req = Request.Builder().url(url(s.server, path, query)).header("Authorization", authHeader(s.token)).build()
         return json.decodeFromString(call(req))
     }
 
     private suspend fun post(path: String, body: String? = null, query: Map<String, Any?> = emptyMap(), delete: Boolean = false) {
-        val s = session ?: return
+        val s = requireSession()
         val b = Request.Builder().url(url(s.server, path, query)).header("Authorization", authHeader(s.token))
         val rb = (body ?: "").toRequestBody(jsonType)
         if (delete) b.delete(rb) else b.post(rb)
@@ -134,7 +166,7 @@ class JellyfinClient(private val http: OkHttpClient, private val prefs: Prefs) {
         "/Items",
         mapOf(
             "userId" to uid, "parentId" to parentId, "recursive" to true, "includeItemTypes" to types,
-            "sortBy" to "SortName", "sortOrder" to "Ascending", "startIndex" to start, "limit" to limit, "fields" to listFields,
+            "sortBy" to "SortName,ProductionYear,DateCreated", "sortOrder" to "Ascending", "startIndex" to start, "limit" to limit, "fields" to listFields,
         )
     )
 
@@ -184,21 +216,21 @@ class JellyfinClient(private val http: OkHttpClient, private val prefs: Prefs) {
 
     fun userImageUrl(): String? {
         val s = session ?: return null
-        return url(s.server, "/Users/${s.userId}/Images/Primary", mapOf("maxWidth" to 120)).toString()
+        return url(s.server, "/UserImage", mapOf("userId" to s.userId, "maxWidth" to 120)).toString()
     }
 
-    /** Original file, direct play (no transcode): what the GPU FEL path needs. */
+    /**
+     * Original file, direct play (no transcode): what the GPU FEL path needs. No token in the URL: the player's
+     * data source sends [authorization] as a header, so it does not end up in proxy / server access logs.
+     */
     fun streamUrl(itemId: String, mediaSourceId: String): String {
         val s = session ?: throw JellyfinException("not signed in")
-        return url(
-            s.server, "/Videos/$itemId/stream",
-            mapOf("static" to true, "mediaSourceId" to mediaSourceId, "api_key" to s.token)
-        ).toString()
+        return url(s.server, "/Videos/$itemId/stream", mapOf("static" to true, "mediaSourceId" to mediaSourceId)).toString()
     }
 
     fun subtitleUrl(itemId: String, mediaSourceId: String, index: Int, format: String): String {
         val s = session ?: throw JellyfinException("not signed in")
-        return url(s.server, "/Videos/$itemId/$mediaSourceId/Subtitles/$index/0/Stream.$format", mapOf("api_key" to s.token)).toString()
+        return url(s.server, "/Videos/$itemId/$mediaSourceId/Subtitles/$index/0/Stream.$format").toString()
     }
 
     // --- playback reporting ---
@@ -215,11 +247,11 @@ class JellyfinClient(private val http: OkHttpClient, private val prefs: Prefs) {
         }.toString()
 
     suspend fun reportStart(itemId: String, ms: String, ps: String, positionMs: Long) =
-        runCatching { post("/Sessions/Playing", progressBody(itemId, ms, ps, positionMs, false)) }
+        attempt { post("/Sessions/Playing", progressBody(itemId, ms, ps, positionMs, false)) }
 
     suspend fun reportProgress(itemId: String, ms: String, ps: String, positionMs: Long, paused: Boolean) =
-        runCatching { post("/Sessions/Playing/Progress", progressBody(itemId, ms, ps, positionMs, paused)) }
+        attempt { post("/Sessions/Playing/Progress", progressBody(itemId, ms, ps, positionMs, paused)) }
 
     suspend fun reportStopped(itemId: String, ms: String, ps: String, positionMs: Long) =
-        runCatching { post("/Sessions/Playing/Stopped", progressBody(itemId, ms, ps, positionMs, false)) }
+        attempt { post("/Sessions/Playing/Stopped", progressBody(itemId, ms, ps, positionMs, false)) }
 }

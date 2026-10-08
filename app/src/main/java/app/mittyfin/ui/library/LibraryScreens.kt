@@ -28,6 +28,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -40,6 +41,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.mittyfin.MittyfinApp
 import app.mittyfin.data.Item
+import app.mittyfin.data.attempt
 import app.mittyfin.ui.components.OnReturn
 import app.mittyfin.ui.components.PosterCard
 import app.mittyfin.ui.components.RefreshBox
@@ -55,6 +57,7 @@ class LibraryViewModel(private val parentId: String) : ViewModel() {
     var total by mutableStateOf(Int.MAX_VALUE)
     var loading by mutableStateOf(false)
     var refreshing by mutableStateOf(false)
+    var retryTick by mutableIntStateOf(0)
 
     init { loadMore() }
 
@@ -62,10 +65,17 @@ class LibraryViewModel(private val parentId: String) : ViewModel() {
         if (loading || items.size >= total) return
         loading = true
         viewModelScope.launch {
-            runCatching { jf.items(parentId, items.size, PAGE, "Movie,Series,BoxSet,Video") }
+            attempt { jf.items(parentId, items.size, PAGE, "Movie,Series,BoxSet,Video") }
                 .onSuccess { r ->
-                    items = items + r.items
+                    // Offset paging over a library that changes (scan, replaced releases) can repeat the item at
+                    // a page boundary; a repeated key would crash the grid.
+                    val seen = items.mapTo(HashSet()) { it.id }
+                    items = items + r.items.filter { seen.add(it.id) }
                     total = r.total
+                }
+                .onFailure {
+                    // Let the grid ask again a little later (its LaunchedEffect keys on retryTick).
+                    viewModelScope.launch { kotlinx.coroutines.delay(3_000); retryTick++ }
                 }
             loading = false
         }
@@ -77,9 +87,9 @@ class LibraryViewModel(private val parentId: String) : ViewModel() {
         loading = true
         refreshing = pulled
         viewModelScope.launch {
-            runCatching { jf.items(parentId, 0, maxOf(items.size, PAGE), "Movie,Series,BoxSet,Video") }
+            attempt { jf.items(parentId, 0, maxOf(items.size, PAGE), "Movie,Series,BoxSet,Video") }
                 .onSuccess { r ->
-                    items = r.items
+                    items = r.items.distinctBy { it.id }
                     total = r.total
                 }
             loading = false
@@ -108,7 +118,9 @@ fun LibraryScreen(parentId: String, title: String, onBack: () -> Unit, onOpenIte
     val vm: LibraryViewModel = viewModel(key = "lib-$parentId") { LibraryViewModel(parentId) }
     val state = rememberLazyGridState()
     val nearEnd by remember { derivedStateOf { (state.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) > vm.items.size - 20 } }
-    LaunchedEffect(nearEnd) { if (nearEnd) vm.loadMore() }
+    // Keyed on the list size and loading flag too: a page that arrives (or fails) while the end is still in view
+    // must trigger the next one, otherwise paging stalls until the user scrolls away and back.
+    LaunchedEffect(nearEnd, vm.items.size, vm.loading, vm.retryTick) { if (nearEnd && !vm.loading) vm.loadMore() }
     OnReturn { vm.reload() }
     Column(Modifier.fillMaxSize()) {
         TopBar(title, onBack)
@@ -139,7 +151,7 @@ class SearchViewModel : ViewModel() {
     suspend fun run(q: String) {
         if (q.isBlank()) { results = emptyList(); return }
         loading = true
-        results = runCatching { MittyfinApp.instance.jellyfin.search(q) }.getOrDefault(emptyList())
+        results = attempt { MittyfinApp.instance.jellyfin.search(q) }.getOrDefault(emptyList())
         loading = false
     }
 }
@@ -170,7 +182,7 @@ class FavoritesViewModel : ViewModel() {
     fun refresh(pulled: Boolean = false) {
         refreshing = pulled
         viewModelScope.launch {
-            items = runCatching { MittyfinApp.instance.jellyfin.favorites() }.getOrDefault(emptyList())
+            items = attempt { MittyfinApp.instance.jellyfin.favorites() }.getOrDefault(emptyList())
             loading = false
             refreshing = false
         }

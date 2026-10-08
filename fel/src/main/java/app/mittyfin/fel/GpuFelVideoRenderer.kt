@@ -43,8 +43,8 @@ class GpuFelFallbackException(message: String) : Exception(message)
  * what to do with the head frame is decided by [FelFrameScheduler] (drop late, submit shortly before it is due, the
  * GPU then waits in eglPresentationTimeANDROID). At most one frame is in flight.
  *
- * Fallback (re-prepared on the normal path by the player): MEL or no EL, no in-band RPU, unsupported RPU syntax,
- * DRM, non-P010 decoder output, decoder or GL errors, or a resolution change.
+ * Fallback (re-prepared on the normal path by the player): no in-band RPU, unsupported RPU syntax, DRM, non-P010
+ * decoder output, decoder or GL errors, or a resolution change. MEL and no-EL P7 stay here (BL + RPU reshaping).
  */
 @UnstableApi
 class GpuFelVideoRenderer(
@@ -130,6 +130,7 @@ class GpuFelVideoRenderer(
     private var lastStatusMs = 0L
     private var noElFrames = 0L
     private var elOrphans = 0L
+    private var droppedReported = 0
 
     override fun getName(): String = NAME
 
@@ -583,6 +584,12 @@ class GpuFelVideoRenderer(
         }
         val now = SystemClock.elapsedRealtime()
         if (now - lastStatusMs > 1_000L && count > 0) {
+            // Late drops reach analytics listeners as MediaCodecVideoRenderer reports them.
+            val dropped = counters.droppedBufferCount
+            if (dropped > droppedReported) {
+                eventDispatcher.droppedFrames(dropped - droppedReported, now - lastStatusMs)
+                droppedReported = dropped
+            }
             lastStatusMs = now
             GpuFelStatus.updateLive(
                 window = c.takeWindowStats(),
