@@ -79,12 +79,13 @@ class MainActivity : ComponentActivity() {
         debugPlay(intent)
     }
 
-    /** Debuggable builds only: `am start -n app.mittyfin/.ui.MainActivity --es debug_play <itemId> [--el debug_start_ms N]`. */
+    /** Debuggable builds only: `am start -n app.mittyfin/.ui.MainActivity --es debug_play <itemId> [--el debug_start_ms N] [--ei debug_sub <streamIndex>]`. */
     private fun debugPlay(intent: Intent?) {
         if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE == 0) return
         val id = intent?.getStringExtra("debug_play") ?: return
         intent.removeExtra("debug_play")
-        val play = PlayRequest(id, id, intent.getLongExtra("debug_start_ms", 0L), null, null)
+        val sub = intent.getIntExtra("debug_sub", Int.MIN_VALUE).takeIf { it != Int.MIN_VALUE }
+        val play = PlayRequest(id, id, intent.getLongExtra("debug_start_ms", 0L), null, sub)
         startActivity(playerIntent(play).putExtra("debug_no_gpufel", intent.getBooleanExtra("debug_no_gpufel", false)))
     }
 

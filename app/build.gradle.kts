@@ -62,4 +62,5 @@ dependencies {
     implementation("androidx.media3:media3-datasource-okhttp:1.8.0")
     // FFmpeg audio decoders (TrueHD, DTS, ...) built by the Jellyfin project for Media3.
     implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.8.0+1")
+    testImplementation("junit:junit:4.13.2")
 }

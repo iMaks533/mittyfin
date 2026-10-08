@@ -11,6 +11,7 @@ import androidx.annotation.OptIn
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
+import android.os.SystemClock
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.view.WindowCompat
@@ -55,6 +56,11 @@ class PlayerUiState {
     var videoSize by mutableStateOf(VideoSize.UNKNOWN)
     var decoderName by mutableStateOf<String?>(null)
     var gpuFelPath by mutableStateOf(false)
+    /** Subtitle offset, ms; positive = later. */
+    var subtitleOffsetMs by mutableLongStateOf(0L)
+    /** SystemClock.elapsedRealtime() at which the sleep timer pauses playback, 0 = off. */
+    var sleepAtMs by mutableLongStateOf(0L)
+    var sleepLeftMs by mutableLongStateOf(0L)
 }
 
 @OptIn(UnstableApi::class)
@@ -67,6 +73,7 @@ class PlayerActivity : ComponentActivity() {
         const val EXTRA_AUDIO_INDEX = "audio_index"
         const val EXTRA_SUBTITLE_INDEX = "subtitle_index"
         private const val TAG = "Mittyfin"
+        private const val MAX_SUBTITLE_OFFSET_MS = 60_000L
     }
 
     private val app get() = MittyfinApp.instance
@@ -84,6 +91,7 @@ class PlayerActivity : ComponentActivity() {
     private var gpuFelFellBack = false
     private var reported = false
     private var progressJob: Job? = null
+    private val subtitleDelay = SubtitleDelay()
     private var pinnedForFps = 0f
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -125,7 +133,7 @@ class PlayerActivity : ComponentActivity() {
         GpuFelStatus.streamElType = null
         val gpuFel = app.prefs.gpuFelEnabled() && !gpuFelFellBack && !intent.getBooleanExtra("debug_no_gpufel", false)
         val dataSource = DefaultDataSource.Factory(this, OkHttpDataSource.Factory(app.http))
-        val p = ExoPlayer.Builder(this, FelRenderersFactory(this, gpuFel))
+        val p = ExoPlayer.Builder(this, FelRenderersFactory(this, gpuFel, subtitleDelay))
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSource))
             .setSeekBackIncrementMs(10_000)
             .setSeekForwardIncrementMs(10_000)
@@ -265,6 +273,34 @@ class PlayerActivity : ComponentActivity() {
         p.trackSelectionParameters = b.build()
     }
 
+    fun setSubtitleOffset(ms: Long) {
+        val v = ms.coerceIn(-MAX_SUBTITLE_OFFSET_MS, MAX_SUBTITLE_OFFSET_MS)
+        ui.subtitleOffsetMs = v
+        subtitleDelay.offsetUs = v * 1000
+    }
+
+    /** Pauses playback [minutes] from now (volume fading out over the last [SleepTimer.FADE_MS]); 0 = off. */
+    fun setSleepTimer(minutes: Int) {
+        ui.sleepAtMs = if (minutes > 0) SystemClock.elapsedRealtime() + minutes * 60_000L else 0L
+        ui.sleepLeftMs = if (minutes > 0) minutes * 60_000L else 0L
+        player?.volume = 1f
+    }
+
+    private fun tickSleepTimer(p: ExoPlayer) {
+        val at = ui.sleepAtMs
+        if (at == 0L) return
+        val left = at - SystemClock.elapsedRealtime()
+        ui.sleepLeftMs = left.coerceAtLeast(0L)
+        if (left > 0L) {
+            p.volume = SleepTimer.volume(left)
+            return
+        }
+        Log.i(TAG, "sleep timer: pause")
+        p.pause()
+        p.volume = 1f
+        ui.sleepAtMs = 0L
+    }
+
     fun setSpeed(speed: Float) {
         val s = speed.coerceIn(0.25f, 3f)
         player?.setPlaybackSpeed(s)
@@ -291,6 +327,7 @@ class PlayerActivity : ComponentActivity() {
                 ui.positionMs = p.currentPosition
                 if (p.duration > 0) ui.durationMs = p.duration
                 ui.gpuFelPath = GpuFelStatus.liveSummary != null
+                tickSleepTimer(p)
                 if (++tick % 40 == 0 && reported) {
                     jf.reportProgress(itemId, mediaSourceId, playSessionId, p.currentPosition, !p.isPlaying)
                 }

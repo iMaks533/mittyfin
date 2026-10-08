@@ -29,6 +29,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AspectRatio
+import androidx.compose.material.icons.filled.AvTimer
+import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.FastRewind
@@ -99,6 +101,8 @@ fun PlayerScreen(activity: PlayerActivity) {
     var trackDialog by remember { mutableStateOf<Int?>(null) }
     var showStats by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
+    var sleepDialog by remember { mutableStateOf(false) }
+    var offsetDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(controls, interaction, ui.isPlaying) {
         if (controls && ui.isPlaying) {
@@ -168,6 +172,16 @@ fun PlayerScreen(activity: PlayerActivity) {
                     onClick = { menu = false; showStats = !showStats }
                 )
                 DropdownMenuItem(
+                    leadingIcon = { Icon(Icons.Default.Bedtime, null) },
+                    text = { Text("Таймер сна: ${if (ui.sleepAtMs == 0L) "выкл." else SleepTimer.label(ui.sleepLeftMs)}") },
+                    onClick = { menu = false; sleepDialog = true }
+                )
+                DropdownMenuItem(
+                    leadingIcon = { Icon(Icons.Default.AvTimer, null) },
+                    text = { Text("Сдвиг субтитров: ${subtitleOffsetLabel(ui.subtitleOffsetMs)}") },
+                    onClick = { menu = false; offsetDialog = true }
+                )
+                DropdownMenuItem(
                     leadingIcon = { Icon(Icons.Default.AspectRatio, null) },
                     text = { Text("Размер видео: ${resizeLabel(resizeMode)}") },
                     onClick = {
@@ -195,6 +209,58 @@ fun PlayerScreen(activity: PlayerActivity) {
         }
 
         trackDialog?.let { type -> TrackDialog(activity, type) { trackDialog = null } }
+        if (sleepDialog) SleepTimerDialog(activity) { sleepDialog = false }
+        if (offsetDialog) SubtitleOffsetDialog(activity) { offsetDialog = false }
+    }
+}
+
+@Composable
+private fun SleepTimerDialog(activity: PlayerActivity, onDismiss: () -> Unit) {
+    val ui = activity.ui
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier.clip(RoundedCornerShape(18.dp)).background(FelColors.SurfaceHigh).padding(vertical = 10.dp)
+                .widthIn(min = 280.dp, max = 420.dp).verticalScroll(rememberScrollState())
+        ) {
+            Text("Таймер сна", color = Color.White, fontSize = 19.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp))
+            if (ui.sleepAtMs != 0L) {
+                Text("Пауза через ${SleepTimer.label(ui.sleepLeftMs)}, звук затихает за 15 с до неё",
+                    color = Color.White.copy(alpha = 0.7f), fontSize = 14.sp, modifier = Modifier.padding(horizontal = 20.dp))
+            }
+            TrackRow("Выкл.", ui.sleepAtMs == 0L) { activity.setSleepTimer(0); onDismiss() }
+            SleepTimer.PRESETS_MIN.forEach { m ->
+                TrackRow(SleepTimer.label(m * 60_000L), false) { activity.setSleepTimer(m); onDismiss() }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SubtitleOffsetDialog(activity: PlayerActivity, onDismiss: () -> Unit) {
+    val ui = activity.ui
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier.clip(RoundedCornerShape(18.dp)).background(FelColors.SurfaceHigh).padding(20.dp).widthIn(min = 300.dp, max = 460.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text("Сдвиг субтитров", color = Color.White, fontSize = 19.sp)
+            Text("«+» — субтитры позже, «−» — раньше", color = Color.White.copy(alpha = 0.7f), fontSize = 14.sp,
+                modifier = Modifier.padding(top = 4.dp, bottom = 14.dp))
+            Text(subtitleOffsetLabel(ui.subtitleOffsetMs), color = FelColors.Accent, fontSize = 28.sp, fontFamily = FontFamily.Monospace)
+            Row(Modifier.padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                listOf(-1000L to "−1 с", -100L to "−0,1", 100L to "+0,1", 1000L to "+1 с").forEach { (delta, label) ->
+                    Box(
+                        Modifier.clip(RoundedCornerShape(12.dp)).background(Glass)
+                            .clickable { activity.setSubtitleOffset(ui.subtitleOffsetMs + delta) }
+                            .padding(horizontal = 14.dp, vertical = 10.dp)
+                    ) { Text(label, color = Color.White, fontSize = 16.sp) }
+                }
+            }
+            Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                Text("Сбросить", color = FelColors.Accent, modifier = Modifier.clickable { activity.setSubtitleOffset(0L) }.padding(8.dp))
+                Text("Готово", color = FelColors.Accent, modifier = Modifier.clickable(onClick = onDismiss).padding(8.dp))
+            }
+        }
     }
 }
 
@@ -235,6 +301,16 @@ private fun Controls(
                     modifier = Modifier.widthIn(max = 320.dp))
             }
             Spacer(Modifier.weight(1f))
+            if (ui.sleepAtMs != 0L) {
+                Row(
+                    Modifier.clip(RoundedCornerShape(20.dp)).background(Glass).padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Bedtime, "Таймер сна", tint = Color.White, modifier = Modifier.size(18.dp))
+                    Text(SleepTimer.label(ui.sleepLeftMs), color = Color.White, fontSize = 14.sp, modifier = Modifier.padding(start = 6.dp))
+                }
+                Spacer(Modifier.width(10.dp))
+            }
             RoundButton(Icons.Default.AspectRatio, "Размер", onClick = onResize)
             Spacer(Modifier.width(10.dp))
             RoundButton(Icons.Default.MoreHoriz, "Ещё", onClick = onMenu)
