@@ -35,8 +35,8 @@ class GpuFelFallbackException(message: String) : Exception(message)
  * output), the RPU through libdovi into composer parameters ([FelComposerParams]); [FelGlComposer] uploads each
  * BL/EL pair and composes it on the GPU, then presents it at the frame's release time.
  *
- * Pairing: both decoders get the same PTS for the two halves of an access unit and output in presentation order,
- * so the heads of the two output queues normally carry equal PTS. An EL frame older than the BL head is dropped; a
+ * Pairing: both decoders get the same PTS for the two halves of an access unit. BL output is taken in order; the EL
+ * half is looked up by PTS (the EL decoder may emit out of presentation order). An EL frame older than the BL head is dropped; a
  * BL frame whose EL has not arrived is held until it would be late, then shown without residual (BL + RPU only).
  *
  * Timing follows MediaCodecVideoRenderer: early = (pts - position) / speed - time since the render() call started;
@@ -62,6 +62,9 @@ class GpuFelVideoRenderer(
         private const val MAX_RPU_FAILURES = 8
         private const val BL_MAX_INPUT_SIZE = 8 * 1024 * 1024
         private const val EL_MAX_INPUT_SIZE = 4 * 1024 * 1024
+        /** BL pictures held before input is paused (~1/3 s at 24p, about half the decoder output pool). */
+        private const val MAX_HELD_OUTPUT = 8
+        private const val MAX_HELD_EL_OUTPUT = 12
 
         fun isFallbackError(error: Throwable?): Boolean {
             var t = error
@@ -102,7 +105,12 @@ class GpuFelVideoRenderer(
     private var blOutputEnded = false
     private var elOutputEnded = false
     private val blOut = ArrayDeque<OutBuf>()
-    private val elOut = ArrayDeque<OutBuf>()
+    /**
+     * EL decoder output by PTS. Some decoders (MediaTek c2.mtk.hevc.decoder on the EL, which carries its parameter
+     * sets in-band) emit EL pictures close to decode order instead of presentation order, so the EL half of a BL
+     * frame is looked up by PTS rather than expected at the head of a queue.
+     */
+    private val elOut = java.util.TreeMap<Long, OutBuf>()
 
     private val paramsByPts = HashMap<Long, FelComposerParams>()
     private var lastParams: FelComposerParams? = null
@@ -121,6 +129,7 @@ class GpuFelVideoRenderer(
     private var lastLogMs = 0L
     private var lastStatusMs = 0L
     private var noElFrames = 0L
+    private var elOrphans = 0L
 
     override fun getName(): String = NAME
 
@@ -329,6 +338,10 @@ class GpuFelVideoRenderer(
         val el = elCodec ?: return
         while (true) {
             if (!samplePending) {
+                // Do not let the decoders run far ahead of the clock: decoded pictures we hold are output buffers the
+                // decoder cannot decode into. EL pictures wait for their BL partner, so the EL limit is looser: a
+                // tight one would stop input while the BL decoder still needs more of it to release its next picture.
+                if (blOut.size >= MAX_HELD_OUTPUT || elOut.size >= MAX_HELD_EL_OUTPUT) return
                 if (inputEnded) {
                     queueEndOfStream(bl, el)
                     return
@@ -449,14 +462,14 @@ class GpuFelVideoRenderer(
 
     private fun drainOutput(codec: MediaCodec?, isBl: Boolean) {
         codec ?: return
-        val queue = if (isBl) blOut else elOut
         while (!(if (isBl) blOutputEnded else elOutputEnded)) {
             val index = codec.dequeueOutputBuffer(outputInfo, 0)
             when {
                 index >= 0 -> {
                     val eos = outputInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
                     if (outputInfo.size > 0 || !eos) {
-                        queue.addLast(OutBuf(index, outputInfo.presentationTimeUs))
+                        val buf = OutBuf(index, outputInfo.presentationTimeUs)
+                        if (isBl) blOut.addLast(buf) else elOut.put(buf.ptsUs, buf)?.let { codec.releaseOutputBuffer(it.index, false) }
                     } else {
                         codec.releaseOutputBuffer(index, false)
                     }
@@ -486,19 +499,20 @@ class GpuFelVideoRenderer(
         while (blOut.isNotEmpty() && c.inFlightFrames < FelFrameScheduler.MAX_IN_FLIGHT) {
             val b = blOut.first()
             // EL frames older than the BL head have lost their partner (dropped BL / decoder skip).
-            while (elOut.isNotEmpty() && elOut.first().ptsUs < b.ptsUs) {
-                el?.releaseOutputBuffer(elOut.removeFirst().index, false)
+            while (elOut.isNotEmpty() && elOut.firstKey() < b.ptsUs) {
+                el?.releaseOutputBuffer(elOut.pollFirstEntry()!!.value.index, false)
+                elOrphans++
             }
             val nowUs = SystemClock.elapsedRealtime() * 1000
             val earlyUs = ((b.ptsUs - positionUs) / playbackSpeed).toLong() - (nowUs - elapsedRealtimeUs)
-            val pairedEl = elOut.firstOrNull()?.takeIf { it.ptsUs == b.ptsUs }
+            val pairedEl = elOut[b.ptsUs]
             val forceFirst = !renderedFirstFrameAfterReset
             when (
                 FelFrameScheduler.decide(
                     blPtsUs = b.ptsUs,
                     lastResetPositionUs = lastResetPositionUs,
                     elPaired = pairedEl != null,
-                    elPending = elOut.isEmpty() && !elOutputEnded,
+                    elPending = pairedEl == null && !elOutputEnded,
                     earlyUs = earlyUs,
                     firstFrameAfterReset = forceFirst,
                     started = started,
@@ -518,7 +532,7 @@ class GpuFelVideoRenderer(
             }
 
             blOut.removeFirst()
-            if (pairedEl != null) elOut.removeFirst()
+            if (pairedEl != null) elOut.remove(b.ptsUs)
             val params = paramsByPts.remove(b.ptsUs) ?: lastParams
             pruneParams(b.ptsUs)
             c.submit(
@@ -542,7 +556,7 @@ class GpuFelVideoRenderer(
         blOut.removeFirst()
         bl.releaseOutputBuffer(b.index, false)
         if (e != null) {
-            elOut.removeFirst()
+            elOut.remove(b.ptsUs)
             el?.releaseOutputBuffer(e.index, false)
         }
         paramsByPts.remove(b.ptsUs)
@@ -581,14 +595,15 @@ class GpuFelVideoRenderer(
         }
         if (now - lastLogMs > 10_000L && count > 0) {
             lastLogMs = now
-            Log.i(TAG, "rendered=$count dropped=${counters.droppedBufferCount} " +
-                "noEl=$noElFrames gl=${"%.1f".format(c.avgFrameMs)}ms")
+            Log.i(TAG, "rendered=$count dropped=${counters.droppedBufferCount} noEl=$noElFrames " +
+                "elOrphans=$elOrphans gl=${"%.1f".format(c.avgFrameMs)}ms")
         }
     }
 
     // --- lifecycle helpers ---
 
     private fun flushCodecs() {
+        splitter.resetParameterSets()
         blOut.clear()
         elOut.clear()
         // Flushing before the first output format would drop the configured csd: recreate instead.
@@ -606,6 +621,7 @@ class GpuFelVideoRenderer(
     }
 
     private fun releaseCodecs() {
+        splitter.resetParameterSets()
         blOut.clear()
         elOut.clear()
         runCatching { blCodec?.stop() }

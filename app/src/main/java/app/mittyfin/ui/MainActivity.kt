@@ -71,17 +71,33 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize()) { App(::startPlayer) }
             }
         }
+        debugPlay(intent)
     }
 
-    private fun startPlayer(r: PlayRequest) {
-        startActivity(Intent(this, PlayerActivity::class.java).apply {
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        debugPlay(intent)
+    }
+
+    /** Debuggable builds only: `am start -n app.mittyfin/.ui.MainActivity --es debug_play <itemId> [--el debug_start_ms N]`. */
+    private fun debugPlay(intent: Intent?) {
+        if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE == 0) return
+        val id = intent?.getStringExtra("debug_play") ?: return
+        intent.removeExtra("debug_play")
+        val play = PlayRequest(id, id, intent.getLongExtra("debug_start_ms", 0L), null, null)
+        startActivity(playerIntent(play).putExtra("debug_no_gpufel", intent.getBooleanExtra("debug_no_gpufel", false)))
+    }
+
+    private fun startPlayer(r: PlayRequest) = startActivity(playerIntent(r))
+
+    private fun playerIntent(r: PlayRequest) =
+        Intent(this, PlayerActivity::class.java).apply {
             putExtra(PlayerActivity.EXTRA_ITEM_ID, r.itemId)
             putExtra(PlayerActivity.EXTRA_MEDIA_SOURCE_ID, r.mediaSourceId)
             putExtra(PlayerActivity.EXTRA_START_MS, r.startMs)
             r.audioStreamIndex?.let { putExtra(PlayerActivity.EXTRA_AUDIO_INDEX, it) }
             r.subtitleStreamIndex?.let { putExtra(PlayerActivity.EXTRA_SUBTITLE_INDEX, it) }
-        })
-    }
+        }
 }
 
 private object Routes {

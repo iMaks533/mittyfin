@@ -33,6 +33,42 @@ class FelAccessUnitSplitterTest {
     private fun Pair<ByteArray, Int>.bytesOf() = first.copyOf(second)
 
     @Test
+    fun seiNalsOfBothLayersAreLeftOut() {
+        val prefixSei = bytes(0x4E, 0x01, 0x89, 0x18, 0x80) // type 39 (mastering display)
+        val suffixSei = bytes(0x50, 0x01, 0x81, 0x01, 0x80) // type 40
+        val au = annexB(sc4, prefixSei, sc4, trailSlice, sc4, wrapEl(prefixSei), sc4, wrapEl(elSlice), sc4, rpu, sc4, suffixSei)
+        val splitter = FelAccessUnitSplitter()
+        splitter.split(ByteBuffer.wrap(au))
+        assertArrayEquals(annexB(sc4, trailSlice), (splitter.bl to splitter.blLength).bytesOf())
+        assertArrayEquals(annexB(sc4, elSlice), (splitter.el to splitter.elLength).bytesOf())
+    }
+
+    @Test
+    fun identicalParameterSetsAreSentOncePerLayerUntilReset() {
+        val idrAu = annexB(sc4, vps, sc4, sps, sc4, pps, sc4, idrSlice, sc4, wrapEl(elSps), sc4, wrapEl(elSlice), sc4, rpu)
+        val splitter = FelAccessUnitSplitter()
+        splitter.split(ByteBuffer.wrap(idrAu))
+        assertArrayEquals(annexB(sc4, vps, sc4, sps, sc4, pps, sc4, idrSlice), (splitter.bl to splitter.blLength).bytesOf())
+
+        // Next GOP repeats the same sets: only the slices go to the decoders.
+        splitter.split(ByteBuffer.wrap(idrAu))
+        assertArrayEquals(annexB(sc4, idrSlice), (splitter.bl to splitter.blLength).bytesOf())
+        assertArrayEquals(annexB(sc4, elSlice), (splitter.el to splitter.elLength).bytesOf())
+        assertEquals(4L, splitter.droppedParameterSets)
+
+        // A changed SPS goes through.
+        val sps2 = bytes(0x42, 0x01, 0x01, 0x23)
+        splitter.split(ByteBuffer.wrap(annexB(sc4, sps2, sc4, idrSlice)))
+        assertArrayEquals(annexB(sc4, sps2, sc4, idrSlice), (splitter.bl to splitter.blLength).bytesOf())
+
+        // After a flush everything is sent again.
+        splitter.resetParameterSets()
+        splitter.split(ByteBuffer.wrap(idrAu))
+        assertArrayEquals(annexB(sc4, vps, sc4, sps, sc4, pps, sc4, idrSlice), (splitter.bl to splitter.blLength).bytesOf())
+        assertArrayEquals(annexB(sc4, elSps, sc4, elSlice), (splitter.el to splitter.elLength).bytesOf())
+    }
+
+    @Test
     fun splitsBaseLayerEnhancementLayerAndRpu() {
         val au = annexB(
             sc4, vps, sc3, sps, sc3, pps, sc4, idrSlice,

@@ -109,6 +109,8 @@ class PlayerActivity : ComponentActivity() {
         setContent { MittyfinTheme { PlayerScreen(this) } }
 
         lifecycleScope.launch {
+            // Process restored straight into the player (or a cold debug start): the saved session is not loaded yet.
+            if (jf.session == null) jf.restore()
             val item = runCatching { jf.item(itemId) }.getOrElse {
                 ui.error = "Не удалось загрузить: ${it.message}"
                 return@launch
@@ -121,7 +123,7 @@ class PlayerActivity : ComponentActivity() {
     private suspend fun startPlayback(startMs: Long) {
         GpuFelStatus.lastFallbackReason = null
         GpuFelStatus.streamElType = null
-        val gpuFel = app.prefs.gpuFelEnabled() && !gpuFelFellBack
+        val gpuFel = app.prefs.gpuFelEnabled() && !gpuFelFellBack && !intent.getBooleanExtra("debug_no_gpufel", false)
         val dataSource = DefaultDataSource.Factory(this, OkHttpDataSource.Factory(app.http))
         val p = ExoPlayer.Builder(this, FelRenderersFactory(this, gpuFel))
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSource))
@@ -179,6 +181,7 @@ class PlayerActivity : ComponentActivity() {
         override fun onIsPlayingChanged(isPlaying: Boolean) { ui.isPlaying = isPlaying }
 
         override fun onPlaybackStateChanged(state: Int) {
+            Log.i(TAG, "state $state at ${player?.currentPosition} ms, buffered ${player?.bufferedPosition} ms")
             ui.buffering = state == Player.STATE_BUFFERING
             if (state == Player.STATE_READY) {
                 ui.durationMs = player?.duration?.takeIf { it > 0 } ?: ui.durationMs

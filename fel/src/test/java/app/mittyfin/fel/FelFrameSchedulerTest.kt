@@ -55,7 +55,7 @@ class FelFrameSchedulerTest {
 
     @Test
     fun noElWaitWhenTheElDecoderHasMovedOnOrEnded() {
-        // elPending = false: a later EL frame is queued (this picture has no EL) or the EL decoder ended
+        // elPending = false: the EL decoder ended (or the stream has no EL for this picture)
         assertEquals(Action.SUBMIT, decide(elPaired = false, elPending = false, earlyUs = 20_000))
     }
 
@@ -64,6 +64,14 @@ class FelFrameSchedulerTest {
         val first = { ms: Long -> decide(elPaired = false, elPending = true, earlyUs = -5_000, firstFrameAfterReset = true, msSinceReset = ms) }
         assertEquals(Action.WAIT, first(0))
         assertEquals(Action.WAIT, first(FelFrameScheduler.FIRST_FRAME_EL_WAIT_MS - 1))
+        assertEquals(Action.SUBMIT, first(FelFrameScheduler.FIRST_FRAME_EL_WAIT_MS))
+    }
+
+    @Test
+    fun firstFrameWhoseElNeverComesIsShownAfterTheBoundedWaitEvenWhenNotDue() {
+        // After a seek the clock stands still until the first frame is shown, so it stays "early" forever.
+        val first = { ms: Long -> decide(elPaired = false, elPending = true, earlyUs = 900_000, firstFrameAfterReset = true, msSinceReset = ms) }
+        assertEquals(Action.WAIT, first(0))
         assertEquals(Action.SUBMIT, first(FelFrameScheduler.FIRST_FRAME_EL_WAIT_MS))
     }
 

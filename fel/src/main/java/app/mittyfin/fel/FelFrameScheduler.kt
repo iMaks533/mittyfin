@@ -31,7 +31,7 @@ internal object FelFrameScheduler {
 
     /**
      * @param elPaired an EL frame with the same PTS heads the EL queue
-     * @param elPending no EL frame is queued yet and the EL decoder has not ended (its half may still arrive)
+     * @param elPending this frame's EL half has not been decoded yet and the EL decoder has not ended (it may still arrive)
      * @param earlyUs how early the frame is (negative = late), already speed-adjusted
      * @param firstFrameAfterReset nothing was shown since the last start/seek (that frame is shown even when paused)
      * @param msSinceReset wall-clock time since the last start/seek
@@ -48,10 +48,14 @@ internal object FelFrameScheduler {
     ): Action {
         if (blPtsUs < lastResetPositionUs) return Action.DROP_PREROLL
         if (!elPaired && elPending) {
-            // The EL half is still decoding: wait while the BL frame is not due yet, and give the first frame after
-            // a start/seek (due by definition, possibly shown paused for long) a bounded wait as well.
-            if (earlyUs > 0) return Action.WAIT
-            if (firstFrameAfterReset && msSinceReset < FIRST_FRAME_EL_WAIT_MS) return Action.WAIT
+            // The EL half is still decoding: wait while the BL frame is not due yet. The first frame after a
+            // start/seek only gets a bounded wait: the clock does not run until it is shown, so "not due yet" would
+            // never end when its EL never comes (EL coded from a later random-access point than the BL).
+            if (firstFrameAfterReset) {
+                if (msSinceReset < FIRST_FRAME_EL_WAIT_MS) return Action.WAIT
+            } else if (earlyUs > 0) {
+                return Action.WAIT
+            }
         }
         if (!firstFrameAfterReset) {
             if (!started) return Action.WAIT // paused: keep the frame for when the clock runs

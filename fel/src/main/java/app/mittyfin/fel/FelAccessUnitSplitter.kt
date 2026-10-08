@@ -7,9 +7,16 @@ import java.nio.ByteBuffer
  * the three parts the GPU FEL path needs:
  *  - BL: every NAL that is not type 62/63, re-emitted with 4-byte start codes (a plain HEVC Main10 picture);
  *  - EL: the payload of every type-63 NAL (the 2-byte 0x7E01 wrapper header dropped), which is itself a complete
- *    HEVC NAL of the enhancement-layer stream;
+ *    HEVC NAL of the enhancement-layer stream (SEI NALs of either layer are left out, see below);
  *  - RPU: the type-62 NAL, kept as-is for libdovi (dovi_parse_unspec62_nalu).
  * The EL's VPS/SPS/PPS are remembered, so a decoder recreated after a seek can be primed with them.
+ *
+ * MediaTek decoders (c2.mtk.hevc.decoder, and c2.dolby.decoder.hevc on top of it) re-initialise ("configUpdate")
+ * on the HDR SEIs and parameter sets that discs repeat before every IDR, and return every picture still in their
+ * pipeline without output: with an IDR each second (The Hunger Games UHD) two thirds of the frames were lost, in any
+ * player. So SEI NALs (mastering display / content light level and the like: no decoding information, the GPU path
+ * sets the window's HDR metadata itself) are not passed on, and a VPS/SPS/PPS byte-identical to the last one passed
+ * on for its layer is left out; [resetParameterSets] (decoder flushed or recreated) lets the next ones through.
  */
 internal class FelAccessUnitSplitter {
     var input = ByteArray(0)
@@ -35,6 +42,23 @@ internal class FelAccessUnitSplitter {
         private set
 
     private val elParameterSets = arrayOfNulls<ByteArray>(3) // VPS, SPS, PPS of the EL stream
+    // Last VPS/SPS/PPS passed on per layer since [resetParameterSets]; identical repeats are dropped.
+    private val sentBl = arrayOfNulls<ByteArray>(3)
+    private val sentEl = arrayOfNulls<ByteArray>(3)
+    private fun isSei(header: Byte): Boolean {
+        val t = (header.toInt() ushr 1) and 0x3F
+        return t == NAL_PREFIX_SEI || t == NAL_SUFFIX_SEI
+    }
+
+    /** Parameter sets left out as repeats (diagnostics). */
+    var droppedParameterSets = 0L
+        private set
+
+    /** The decoders were flushed or recreated: they need the parameter sets again. */
+    fun resetParameterSets() {
+        sentBl.fill(null)
+        sentEl.fill(null)
+    }
 
     fun split(data: ByteBuffer) {
         val length = data.remaining()
@@ -91,13 +115,33 @@ internal class FelAccessUnitSplitter {
             NAL_DV_EL -> {
                 if (end - begin <= 2) return
                 rememberElParameterSet(input, begin + 2, end)
+                if (isRepeat(sentEl, begin + 2, end)) return
+                if (isSei(input[begin + 2])) return
                 el = append(el, elLength, input, begin + 2, end).also { elLength += 4 + end - begin - 2 }
             }
             else -> {
                 if (type < 32 && blFirstVclType < 0) blFirstVclType = type
+                if (isRepeat(sentBl, begin, end)) return
+                if (isSei(input[begin])) return
                 bl = append(bl, blLength, input, begin, end).also { blLength += 4 + end - begin }
             }
         }
+    }
+
+    /** For a VPS/SPS/PPS at input[begin, end): true when it equals the last one sent (drop it), else records it. */
+    private fun isRepeat(sent: Array<ByteArray?>, begin: Int, end: Int): Boolean {
+        val type = (input[begin].toInt() ushr 1) and 0x3F
+        if (type < NAL_VPS || type > NAL_PPS) return false
+        val slot = type - NAL_VPS
+        val last = sent[slot]
+        if (last != null && last.size == end - begin &&
+            java.util.Arrays.equals(last, 0, last.size, input, begin, end)
+        ) {
+            droppedParameterSets++
+            return true
+        }
+        sent[slot] = input.copyOfRange(begin, end)
+        return false
     }
 
     private fun rememberElParameterSet(src: ByteArray, begin: Int, end: Int) {
@@ -115,6 +159,8 @@ internal class FelAccessUnitSplitter {
         const val NAL_VPS = 32
         const val NAL_SPS = 33
         const val NAL_PPS = 34
+        const val NAL_PREFIX_SEI = 39
+        const val NAL_SUFFIX_SEI = 40
         const val NAL_DV_RPU = 62
         const val NAL_DV_EL = 63
         private val START_CODE = byteArrayOf(0, 0, 0, 1)
