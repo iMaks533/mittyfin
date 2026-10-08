@@ -59,6 +59,7 @@ class FelRenderersFactory(
     private val offsets: PlaybackOffsets = PlaybackOffsets(),
     private val gain: GainAudioProcessor = GainAudioProcessor(),
     private val stripSdh: () -> Boolean = { false },
+    private val frameRateHint: () -> Float? = { null },
 ) : DefaultRenderersFactory(context) {
     init {
         setExtensionRendererMode(EXTENSION_RENDERER_MODE_ON) // FFmpeg audio (TrueHD, DTS) when the platform has none
@@ -76,7 +77,7 @@ class FelRenderersFactory(
         out: ArrayList<Renderer>
     ) {
         val built = ArrayList<Renderer>()
-        if (gpuFel && GpuFelSupport.isDeviceUsable()) built.add(GpuFelVideoRenderer(context, eventHandler, eventListener))
+        if (gpuFel && GpuFelSupport.isDeviceUsable()) built.add(GpuFelVideoRenderer(context, eventHandler, eventListener, frameRateHint = frameRateHint))
         super.buildVideoRenderers(
             context, extensionRendererMode, mediaCodecSelector, enableDecoderFallback,
             eventHandler, eventListener, allowedVideoJoiningTimeMs, built
@@ -227,6 +228,20 @@ object RefreshPin {
         val ratio = refreshHz / fps
         val n = ratio.roundToInt()
         return n >= 1 && abs(ratio - n) / ratio <= 0.005f
+    }
+}
+
+/**
+ * Content frame rate: the container's when it has one, else the server's probe (Matroska often has no rate in the
+ * track header). The server rounds to two decimals, so 23.98 / 29.97 / 59.94 / 119.88 snap back to the exact NTSC rate.
+ */
+object FrameRate {
+    private val NTSC = floatArrayOf(24000f / 1001, 30000f / 1001, 60000f / 1001, 120000f / 1001)
+
+    fun resolve(formatFps: Float?, serverFps: Float?): Float? {
+        formatFps?.takeIf { it > 1f }?.let { return it }
+        val s = serverFps?.takeIf { it > 1f } ?: return null
+        return NTSC.firstOrNull { abs(it - s) < 0.006f } ?: s
     }
 }
 

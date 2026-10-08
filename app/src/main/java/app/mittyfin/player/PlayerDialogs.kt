@@ -210,7 +210,7 @@ private fun trackLabel(group: Tracks.Group): String {
         f.label,
         languageName(f.language),
         "принудительные".takeIf { f.selectionFlags and C.SELECTION_FLAG_FORCED != 0 },
-        f.sampleMimeType?.substringAfter('/')?.uppercase(),
+        codecName(f.sampleMimeType, f.codecs),
         f.channelCount.takeIf { it > 0 }?.let { "${it}ch" },
     )
     return parts.distinct().joinToString(" · ").ifBlank { "Дорожка" }
@@ -438,10 +438,10 @@ internal fun StatsPanel(activity: PlayerActivity, modifier: Modifier) {
     LaunchedEffect(Unit) { while (true) { delay(1000); tick++ } }
     val p = activity.player
     val f = p?.videoFormat
-    val src = ui.item?.mediaSources?.firstOrNull()
+    val src = activity.source
     val lines = buildList {
         @Suppress("UNUSED_EXPRESSION") tick
-        add("Видео" to (f?.let { "${it.width}×${it.height} · ${if (it.frameRate > 0) "%.3f".format(it.frameRate) else "?"} fps · ${it.codecs ?: it.sampleMimeType}" } ?: "—"))
+        add("Видео" to (f?.let { "${it.width}×${it.height} · ${FrameRate.resolve(it.frameRate, src?.videoFrameRate)?.let { r -> "%.3f".format(Locale.US, r) } ?: "?"} fps · ${it.codecs ?: it.sampleMimeType}" } ?: "—"))
         add("Режим" to if (ui.transcoding) "перекодирование на сервере" else "прямое воспроизведение")
         add("Битрейт" to mbps(src?.bitrate ?: f?.bitrate?.toLong() ?: 0))
         add("Сеть" to mbps(ui.bandwidthBps))

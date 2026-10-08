@@ -52,6 +52,8 @@ class GpuFelVideoRenderer(
     eventHandler: Handler?,
     eventListener: VideoRendererEventListener?,
     private val onSelectionChanged: (Boolean) -> Unit = {},
+    /** Content frame rate from outside (the server's probe) for containers whose track header has none. */
+    private val frameRateHint: () -> Float? = { null },
 ) : BaseRenderer(C.TRACK_TYPE_VIDEO) {
 
     companion object {
@@ -304,9 +306,9 @@ class GpuFelVideoRenderer(
         val width = format.width.takeIf { it > 0 } ?: 3840
         val height = format.height.takeIf { it > 0 } ?: 2160
         val blCsd = splitter.splitCsd(format.initializationData)
-        blCodec = createCodec(name, width, height, blCsd, maxOf(format.maxInputSize, BL_MAX_INPUT_SIZE), format.frameRate)
+        blCodec = createCodec(name, width, height, blCsd, maxOf(format.maxInputSize, BL_MAX_INPUT_SIZE), contentFrameRate(format))
         // FEL is coded at quarter size (EL spatial resampling); the decoder adapts if the EL SPS says otherwise.
-        elCodec = createCodec(name, width / 2, height / 2, splitter.elCsd(), EL_MAX_INPUT_SIZE, format.frameRate)
+        elCodec = createCodec(name, width / 2, height / 2, splitter.elCsd(), EL_MAX_INPUT_SIZE, contentFrameRate(format))
         blOutputFormatSeen = false
         elOutputFormatSeen = false
         Log.i(TAG, "decoders up: $name BL ${width}x$height, EL ${width / 2}x${height / 2}, " +
@@ -647,7 +649,7 @@ class GpuFelVideoRenderer(
      */
     private fun applySurfaceFrameRate() {
         val surface = outputSurface ?: return
-        val fps = inputFormat?.frameRate?.takeIf { it > 1f } ?: return
+        val fps = inputFormat?.let { contentFrameRate(it) }?.takeIf { it > 1f } ?: return
         if (android.os.Build.VERSION.SDK_INT < 30 || !surface.isValid) return
         runCatching {
             if (android.os.Build.VERSION.SDK_INT >= 31) {
@@ -657,6 +659,9 @@ class GpuFelVideoRenderer(
             }
         }.onFailure { Log.w(TAG, "setFrameRate($fps) failed: ${it.message}") }
     }
+
+    private fun contentFrameRate(format: Format): Float =
+        format.frameRate.takeIf { it > 1f } ?: frameRateHint()?.takeIf { it > 1f } ?: Format.NO_VALUE.toFloat()
 
     private fun clearSurfaceFrameRate() {
         val surface = outputSurface ?: return

@@ -15,6 +15,23 @@ fun langKey(code: String?): String? {
         ?: c
 }
 
+private val CODEC_NAMES = mapOf(
+    "text/x-ssa" to "ASS", "application/x-subrip" to "SRT", "text/vtt" to "VTT", "application/ttml+xml" to "TTML",
+    "application/x-mp4-vtt" to "VTT", "application/pgs" to "PGS", "application/vobsub" to "VobSub", "application/dvbsubs" to "DVB",
+    "audio/true-hd" to "TrueHD", "audio/vnd.dts.hd" to "DTS-HD", "audio/vnd.dts" to "DTS", "audio/eac3" to "E-AC3",
+    "audio/eac3-joc" to "E-AC3 Atmos", "audio/ac3" to "AC3", "audio/mp4a-latm" to "AAC", "audio/flac" to "FLAC",
+    "audio/opus" to "Opus", "audio/mpeg" to "MP3", "audio/raw" to "PCM",
+)
+
+/**
+ * Codec name for a track label. Subtitles parsed during extraction arrive as `application/x-media3-cues` with the
+ * original format in `codecs`, so that one is named instead of "X-MEDIA3-CUES".
+ */
+fun codecName(sampleMimeType: String?, codecs: String?): String? {
+    val mime = (if (sampleMimeType == "application/x-media3-cues") codecs else sampleMimeType)?.lowercase() ?: return null
+    return CODEC_NAMES[mime] ?: mime.substringAfter('/').removePrefix("x-").uppercase()
+}
+
 /** Picks the audio and subtitle streams (Jellyfin indices) a title starts with. */
 object TrackChooser {
     data class Choice(val audioIndex: Int?, val subtitleIndex: Int) // subtitle -1 = off

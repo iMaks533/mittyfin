@@ -62,6 +62,8 @@ data class MediaStream(
     @SerialName("IsTextSubtitleStream") val isTextSubtitleStream: Boolean = false,
     @SerialName("BitRate") val bitRate: Long? = null,
     @SerialName("DeliveryUrl") val deliveryUrl: String? = null,
+    @SerialName("RealFrameRate") val realFrameRate: Float? = null,
+    @SerialName("AverageFrameRate") val averageFrameRate: Float? = null,
 )
 
 @Serializable
@@ -76,7 +78,10 @@ data class MediaSource(
     @SerialName("DefaultSubtitleStreamIndex") val defaultSubtitleStreamIndex: Int? = null,
     @SerialName("TranscodingUrl") val transcodingUrl: String? = null,
     @SerialName("SupportsDirectPlay") val supportsDirectPlay: Boolean = true,
-)
+) {
+    /** Frame rate of the video stream as probed by the server; Matroska files often carry none in the track header. */
+    val videoFrameRate: Float? get() = mediaStreams.firstOrNull { it.type == "Video" }?.let { it.realFrameRate ?: it.averageFrameRate }
+}
 
 @Serializable
 data class Chapter(

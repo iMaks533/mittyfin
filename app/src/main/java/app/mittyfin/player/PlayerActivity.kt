@@ -194,7 +194,7 @@ class PlayerActivity : ComponentActivity() {
 
     private val memoryKey: String get() = ui.item?.let { if (it.isEpisode) it.seriesId ?: it.id else it.id } ?: itemId
     private val playMethod: String get() = if (ui.transcoding) "Transcode" else "DirectPlay"
-    private val source: MediaSource? get() = ui.item?.mediaSources?.firstOrNull { it.id == mediaSourceId } ?: ui.item?.mediaSources?.firstOrNull()
+    internal val source: MediaSource? get() = ui.item?.mediaSources?.firstOrNull { it.id == mediaSourceId } ?: ui.item?.mediaSources?.firstOrNull()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -316,7 +316,7 @@ class PlayerActivity : ComponentActivity() {
         val http = OkHttpDataSource.Factory(app.http).setDefaultRequestProperties(headers)
         val dataSource = DefaultDataSource.Factory(this, http)
 
-        val felFactory = FelRenderersFactory(this, gpuFel, offsets, gain) { ui.settings.stripSdh }
+        val felFactory = FelRenderersFactory(this, gpuFel, offsets, gain, stripSdh = { ui.settings.stripSdh }, frameRateHint = { source?.videoFrameRate })
         val renderers: RenderersFactory
         val extractors: ExtractorsFactory
         val mediaSources: DefaultMediaSourceFactory
@@ -901,7 +901,7 @@ class PlayerActivity : ComponentActivity() {
 
     /** 24p on a 120 Hz mode: 5 refreshes per frame. Variable-refresh policies may still lower it. */
     private fun pinRefreshRate() {
-        val fps = player?.videoFormat?.frameRate ?: return
+        val fps = FrameRate.resolve(player?.videoFormat?.frameRate, source?.videoFrameRate) ?: return
         if (fps <= 1f || kotlin.math.abs(fps - pinnedForFps) < 0.01f) return
         val display = window.decorView.display ?: return
         val tv = packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_LEANBACK)

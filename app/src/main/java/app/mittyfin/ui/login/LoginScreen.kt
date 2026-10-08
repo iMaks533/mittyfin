@@ -43,7 +43,7 @@ fun LoginScreen(onSignedIn: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(Unit) { server = app.prefs.lastServer() ?: "http://192.168.1.10:8096" }
+    LaunchedEffect(Unit) { server = app.prefs.lastServer().orEmpty() }
 
     Column(
         Modifier.fillMaxSize().statusBarsPadding().imePadding().verticalScroll(rememberScrollState()).padding(24.dp),
@@ -57,7 +57,8 @@ fun LoginScreen(onSignedIn: () -> Unit) {
         )
         Spacer(Modifier.height(8.dp))
         OutlinedTextField(
-            value = server, onValueChange = { server = it }, label = { Text("Адрес сервера") }, singleLine = true,
+            value = server, onValueChange = { server = it }, label = { Text("Адрес сервера") },
+            placeholder = { Text("192.168.1.10 или https://jellyfin.example.com") }, singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), modifier = Modifier.fillMaxWidth()
         )
         OutlinedTextField(
