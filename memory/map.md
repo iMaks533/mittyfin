@@ -61,6 +61,10 @@ OkHttp 4.12 + kotlinx.serialization, DataStore, Coil 3. minSdk 29, target 36, т
 - Пульт: навигация на ТВ — левая панель (`NavRail`), на телефоне — нижняя пилюля. Нижняя
   панель на ТВ ломала вход фокуса в списки. Pull-to-refresh на ТВ выключен.
 - Подгонка частоты: телефон — режим ≥48 Гц, кратный fps (24p → 120 Гц); ТВ — сам 23,976 Гц.
+- Media3 не знает fps у многих MKV (`Format.frameRate = -1`) → `FrameRate.resolve` берёт
+  `MediaSource.videoFrameRate` с сервера (23,98 → 24000/1001); тот же хинт идёт в `GpuFelVideoRenderer`.
+- Скриншоты HDR-кадров (`screencap`) сохраняются в SDR и обрезают насыщенные цвета: синий фон
+  тестового FEL-ролика выходит одним цветом. Для README — зелёный фрагмент ≈0:43 и режим «EL residual ×32».
 
 ## Чек-листы
 
