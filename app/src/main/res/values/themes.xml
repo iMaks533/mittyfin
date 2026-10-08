@@ -9,5 +9,5 @@
         <item name="android:windowFullscreen">true</item>
     </style>
     <color name="fel_background">#111620</color>
-    <color name="fel_icon_bg">#111620</color>
+    <color name="ic_launcher_bg">#010004</color>
 </resources>
