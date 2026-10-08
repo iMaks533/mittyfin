@@ -135,7 +135,7 @@ fun CountBadge(count: Int?, modifier: Modifier = Modifier) {
 @Composable
 fun PosterCard(item: Item, onClick: () -> Unit, width: Dp = 112.dp, modifier: Modifier = Modifier) {
     val sized = if (width == Dp.Unspecified) Modifier.fillMaxWidth() else Modifier.width(width)
-    Column(modifier.then(sized).clickable(onClick = onClick)) {
+    Column(modifier.then(sized).focusHighlight(RoundedCornerShape(12.dp)).clickable(onClick = onClick)) {
         Box(Modifier.fillMaxWidth().aspectRatio(2f / 3f).clip(RoundedCornerShape(14.dp)).background(FelColors.Surface)) {
             AsyncImage(
                 model = posterUrl(item), contentDescription = item.name,
@@ -176,7 +176,7 @@ fun Pill(text: String, modifier: Modifier = Modifier) {
 /** 16:9 card: continue watching (remaining time + progress) and next up (episode runtime). */
 @Composable
 fun WideCard(item: Item, onClick: () -> Unit, width: Dp = 196.dp, showRemaining: Boolean = true) {
-    Column(Modifier.width(width).clickable(onClick = onClick)) {
+    Column(Modifier.width(width).focusHighlight(RoundedCornerShape(12.dp)).clickable(onClick = onClick)) {
         Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(14.dp)).background(FelColors.Surface)) {
             AsyncImage(
                 model = landscapeUrl(item), contentDescription = item.name,
@@ -206,7 +206,7 @@ fun WideCard(item: Item, onClick: () -> Unit, width: Dp = 196.dp, showRemaining:
 /** Library tile: image with the library name in bold over it, caption below. */
 @Composable
 fun LibraryCard(view: Item, onClick: () -> Unit, width: Dp = 168.dp) {
-    Column(Modifier.width(width).clickable(onClick = onClick), horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(Modifier.width(width).focusHighlight(RoundedCornerShape(12.dp)).clickable(onClick = onClick), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(14.dp)).background(Color.Black)) {
             AsyncImage(
                 model = jf.imageUrl(view.id, "Primary", view.imageTags["Primary"], 640), contentDescription = view.name,

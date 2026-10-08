@@ -60,6 +60,10 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.8.0")
     implementation("androidx.media3:media3-ui:1.8.0")
     implementation("androidx.media3:media3-datasource-okhttp:1.8.0")
+    implementation("androidx.media3:media3-exoplayer-hls:1.8.0")
+    implementation("androidx.media3:media3-session:1.8.0")
+    // libass for ASS/SSA subtitles (the same build Nuvio uses, Media3 1.8).
+    implementation("io.github.peerless2012:ass-media:0.4.0")
     // FFmpeg audio decoders (TrueHD, DTS, ...) built by the Jellyfin project for Media3.
     implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.8.0+1")
     testImplementation("junit:junit:4.13.2")

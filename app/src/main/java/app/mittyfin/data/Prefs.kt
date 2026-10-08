@@ -5,7 +5,11 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import java.util.UUID
 
 private val Context.store by preferencesDataStore(name = "mittyfin")
@@ -14,6 +18,10 @@ private val Context.store by preferencesDataStore(name = "mittyfin")
 data class Session(val server: String, val userId: String, val userName: String, val token: String)
 
 class Prefs(private val context: Context) {
+    companion object {
+        private const val MEMORY_LIMIT = 400
+    }
+
     private object K {
         val server = stringPreferencesKey("server")
         val userId = stringPreferencesKey("user_id")
@@ -23,6 +31,8 @@ class Prefs(private val context: Context) {
         val gpuFel = booleanPreferencesKey("gpu_fel")
         val lastServer = stringPreferencesKey("last_server")
         val subtitleStyle = stringPreferencesKey("subtitle_style")
+        val settings = stringPreferencesKey("settings")
+        val memory = stringPreferencesKey("title_memory")
     }
 
     suspend fun session(): Session? {
@@ -65,6 +75,35 @@ class Prefs(private val context: Context) {
 
     suspend fun setGpuFelEnabled(enabled: Boolean) {
         context.store.edit { it[K.gpuFel] = enabled }
+    }
+
+    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = false; coerceInputValues = true }
+
+    private fun decodeSettings(raw: String?): AppSettings =
+        raw?.let { runCatching { json.decodeFromString<AppSettings>(it) }.getOrNull() } ?: AppSettings()
+
+    val settingsFlow: Flow<AppSettings> = context.store.data.map { decodeSettings(it[K.settings]) }
+
+    suspend fun settings(): AppSettings = decodeSettings(context.store.data.first()[K.settings])
+
+    suspend fun updateSettings(transform: (AppSettings) -> AppSettings) {
+        context.store.edit { it[K.settings] = json.encodeToString(AppSettings.serializer(), transform(decodeSettings(it[K.settings]))) }
+    }
+
+    private fun decodeMemory(raw: String?): Map<String, TitleMemory> =
+        raw?.let { runCatching { json.decodeFromString<Map<String, TitleMemory>>(it) }.getOrNull() } ?: emptyMap()
+
+    suspend fun memory(key: String): TitleMemory? = decodeMemory(context.store.data.first()[K.memory])[key]
+
+    /** Updates what title [key] remembers; keeps the most recent [MEMORY_LIMIT] titles. */
+    suspend fun remember(key: String, transform: (TitleMemory) -> TitleMemory) {
+        context.store.edit { prefs ->
+            val all = decodeMemory(prefs[K.memory]).toMutableMap()
+            all[key] = transform(all[key] ?: TitleMemory()).copy(updatedAt = System.currentTimeMillis())
+            val kept = if (all.size <= MEMORY_LIMIT) all else all.entries.sortedByDescending { it.value.updatedAt }
+                .take(MEMORY_LIMIT).associate { it.key to it.value }
+            prefs[K.memory] = json.encodeToString<Map<String, TitleMemory>>(kept)
+        }
     }
 
     /** Encoded [app.mittyfin.player.SubtitleStyle], null = defaults. */

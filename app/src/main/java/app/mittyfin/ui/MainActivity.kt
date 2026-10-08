@@ -46,6 +46,9 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import app.mittyfin.MittyfinApp
 import app.mittyfin.data.Item
+import app.mittyfin.data.JellyfinClient
+import app.mittyfin.ui.settings.SettingsScreen
+import app.mittyfin.ui.components.focusHighlight
 import app.mittyfin.fel.GpuFelSupport
 import app.mittyfin.player.PlayerActivity
 import app.mittyfin.ui.details.DetailsScreen
@@ -109,15 +112,19 @@ private object Routes {
     const val FAVORITES = "favorites"
     const val ITEM = "item/{id}"
     const val LIBRARY = "library/{id}?name={name}"
+    const val GENRE = "genre/{id}?name={name}"
+    const val PERSON = "person/{id}?name={name}"
+    const val SETTINGS = "settings"
     fun item(id: String) = "item/$id"
     fun library(id: String, name: String) = "library/$id?name=${URLEncoder.encode(name, "UTF-8")}"
+    fun genre(id: String, name: String) = "genre/$id?name=${URLEncoder.encode(name, "UTF-8")}"
+    fun person(id: String, name: String) = "person/$id?name=${URLEncoder.encode(name, "UTF-8")}"
 }
 
 @Composable
 private fun App(onPlay: (PlayRequest) -> Unit) {
     val nav = rememberNavController()
     val jf = MittyfinApp.instance.jellyfin
-    var showSettings by remember { mutableStateOf(false) }
     val backStack by nav.currentBackStackEntryAsState()
     val route = backStack?.destination?.route
 
@@ -144,7 +151,7 @@ private fun App(onPlay: (PlayRequest) -> Unit) {
                 HomeScreen(
                     onOpenItem = openItem,
                     onOpenLibrary = { nav.navigate(Routes.library(it.id, it.name)) },
-                    onOpenSettings = { showSettings = true },
+                    onOpenSettings = { nav.navigate(Routes.SETTINGS) },
                 )
             }
             composable(Routes.SEARCH) { SearchScreen(onOpenItem = openItem) }
@@ -152,23 +159,32 @@ private fun App(onPlay: (PlayRequest) -> Unit) {
             composable(Routes.LIBRARY) { entry ->
                 val id = entry.arguments?.getString("id").orEmpty()
                 val name = entry.arguments?.getString("name").orEmpty()
-                LibraryScreen(id, name, onBack = { nav.popBackStack() }, onOpenItem = openItem)
+                LibraryScreen(JellyfinClient.Query(parentId = id), name, onBack = { nav.popBackStack() }, onOpenItem = openItem)
+            }
+            composable(Routes.GENRE) { entry ->
+                val id = entry.arguments?.getString("id").orEmpty()
+                val name = entry.arguments?.getString("name").orEmpty()
+                LibraryScreen(JellyfinClient.Query(genreId = id, types = "Movie,Series"), name, onBack = { nav.popBackStack() }, onOpenItem = openItem)
+            }
+            composable(Routes.PERSON) { entry ->
+                val id = entry.arguments?.getString("id").orEmpty()
+                val name = entry.arguments?.getString("name").orEmpty()
+                LibraryScreen(JellyfinClient.Query(personId = id, types = "Movie,Series", sortBy = "ProductionYear", descending = true), name,
+                    onBack = { nav.popBackStack() }, onOpenItem = openItem)
+            }
+            composable(Routes.SETTINGS) {
+                SettingsScreen(onBack = { nav.popBackStack() }, onLoggedOut = { nav.navigate(Routes.LOGIN) { popUpTo(0) } })
             }
             composable(Routes.ITEM) { entry ->
                 val id = entry.arguments?.getString("id").orEmpty()
-                DetailsScreen(id, onBack = { nav.popBackStack() }, onOpenItem = openItem, onPlay = onPlay)
+                DetailsScreen(id, onBack = { nav.popBackStack() }, onOpenItem = openItem, onPlay = onPlay,
+                    onOpenPerson = { nav.navigate(Routes.person(it.id, it.name)) },
+                    onOpenGenre = { nav.navigate(Routes.genre(it.id, it.name)) })
             }
         }
-        if (route != null && route != Routes.LOGIN && route != Routes.LOADING) {
+        if (route != null && route != Routes.LOGIN && route != Routes.LOADING && route != Routes.SETTINGS) {
             BottomPill(route, nav, Modifier.align(Alignment.BottomCenter))
         }
-        if (showSettings) SettingsDialog(
-            onDismiss = { showSettings = false },
-            onLogout = {
-                showSettings = false
-                nav.navigate(Routes.LOGIN) { popUpTo(0) }
-            }
-        )
     }
 }
 
@@ -196,43 +212,10 @@ private fun BottomPill(route: String, nav: NavHostController, modifier: Modifier
 @Composable
 private fun PillButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, selected: Boolean, onClick: () -> Unit) {
     Box(
-        Modifier.size(56.dp).clip(CircleShape).background(if (selected) FelColors.Badge else Color.Transparent),
+        Modifier.size(56.dp).focusHighlight(CircleShape).clip(CircleShape).background(if (selected) FelColors.Badge else Color.Transparent),
         contentAlignment = Alignment.Center
     ) {
         IconButton(onClick = onClick) { Icon(icon, label, Modifier.size(28.dp), tint = if (selected) FelColors.OnChip else Color.White) }
     }
 }
 
-@Composable
-private fun SettingsDialog(onDismiss: () -> Unit, onLogout: () -> Unit) {
-    val app = MittyfinApp.instance
-    val scope = rememberCoroutineScope()
-    var gpuFel by remember { mutableStateOf(true) }
-    LaunchedEffect(Unit) { gpuFel = app.prefs.gpuFelEnabled() }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Настройки") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Сервер: ${app.jellyfin.session?.server ?: "-"}\nПользователь: ${app.jellyfin.session?.userName ?: "-"}")
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Dolby Vision P7 FEL через GPU")
-                        Text(
-                            GpuFelSupport.unavailableReason()?.let { "Недоступно: $it" } ?: "Устройство: ${GpuFelSupport.decoderName}",
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(checked = gpuFel, onCheckedChange = {
-                        gpuFel = it
-                        scope.launch { app.prefs.setGpuFelEnabled(it) }
-                    })
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Готово") } },
-        dismissButton = {
-            TextButton(onClick = { scope.launch { app.jellyfin.logout(); onLogout() } }) { Text("Выйти") }
-        }
-    )
-}

@@ -57,6 +57,11 @@ data class MediaStream(
     @SerialName("DvLevel") val dvLevel: Int? = null,
     @SerialName("ElPresentFlag") val elPresentFlag: Int? = null,
     @SerialName("Channels") val channels: Int? = null,
+    @SerialName("Profile") val profile: String? = null,
+    @SerialName("IsHearingImpaired") val isHearingImpaired: Boolean = false,
+    @SerialName("IsTextSubtitleStream") val isTextSubtitleStream: Boolean = false,
+    @SerialName("BitRate") val bitRate: Long? = null,
+    @SerialName("DeliveryUrl") val deliveryUrl: String? = null,
 )
 
 @Serializable
@@ -69,6 +74,66 @@ data class MediaSource(
     @SerialName("MediaStreams") val mediaStreams: List<MediaStream> = emptyList(),
     @SerialName("DefaultAudioStreamIndex") val defaultAudioStreamIndex: Int? = null,
     @SerialName("DefaultSubtitleStreamIndex") val defaultSubtitleStreamIndex: Int? = null,
+    @SerialName("TranscodingUrl") val transcodingUrl: String? = null,
+    @SerialName("SupportsDirectPlay") val supportsDirectPlay: Boolean = true,
+)
+
+@Serializable
+data class Chapter(
+    @SerialName("Name") val name: String? = null,
+    @SerialName("StartPositionTicks") val startTicks: Long = 0,
+    @SerialName("ImageTag") val imageTag: String? = null,
+) {
+    val startMs: Long get() = startTicks / 10_000L
+}
+
+/** Jellyfin media segment (10.10+): intro / recap / outro (credits) / preview / commercial. */
+@Serializable
+data class MediaSegment(
+    @SerialName("Type") val type: String = "",
+    @SerialName("StartTicks") val startTicks: Long = 0,
+    @SerialName("EndTicks") val endTicks: Long = 0,
+) {
+    val startMs: Long get() = startTicks / 10_000L
+    val endMs: Long get() = endTicks / 10_000L
+}
+
+@Serializable
+data class MediaSegmentsResult(@SerialName("Items") val items: List<MediaSegment> = emptyList())
+
+/** One trickplay resolution of one media source: tiles of [tileWidth] x [tileHeight] thumbnails. */
+@Serializable
+data class TrickplayInfo(
+    @SerialName("Width") val width: Int = 0,
+    @SerialName("Height") val height: Int = 0,
+    @SerialName("TileWidth") val tileWidth: Int = 10,
+    @SerialName("TileHeight") val tileHeight: Int = 10,
+    @SerialName("ThumbnailCount") val thumbnailCount: Int = 0,
+    @SerialName("Interval") val intervalMs: Int = 10_000,
+)
+
+@Serializable
+data class Person(
+    @SerialName("Id") val id: String,
+    @SerialName("Name") val name: String = "",
+    @SerialName("Role") val role: String? = null,
+    @SerialName("Type") val type: String? = null,
+    @SerialName("PrimaryImageTag") val primaryImageTag: String? = null,
+)
+
+@Serializable
+data class NamedId(
+    @SerialName("Id") val id: String,
+    @SerialName("Name") val name: String = "",
+)
+
+@Serializable
+data class GenresResult(@SerialName("Items") val items: List<NamedId> = emptyList())
+
+@Serializable
+data class PlaybackInfoResult(
+    @SerialName("MediaSources") val mediaSources: List<MediaSource> = emptyList(),
+    @SerialName("PlaySessionId") val playSessionId: String? = null,
 )
 
 @Serializable
@@ -101,6 +166,14 @@ data class Item(
     @SerialName("UserData") val userData: UserData? = null,
     @SerialName("MediaSources") val mediaSources: List<MediaSource> = emptyList(),
     @SerialName("ChildCount") val childCount: Int? = null,
+    @SerialName("CriticRating") val criticRating: Float? = null,
+    @SerialName("Taglines") val taglines: List<String> = emptyList(),
+    @SerialName("Chapters") val chapters: List<Chapter> = emptyList(),
+    @SerialName("People") val people: List<Person> = emptyList(),
+    @SerialName("GenreItems") val genreItems: List<NamedId> = emptyList(),
+    @SerialName("Studios") val studios: List<NamedId> = emptyList(),
+    /** mediaSourceId -> (width -> info). */
+    @SerialName("Trickplay") val trickplay: Map<String, Map<String, TrickplayInfo>> = emptyMap(),
 ) {
     val isSeries: Boolean get() = type == "Series"
     val isEpisode: Boolean get() = type == "Episode"

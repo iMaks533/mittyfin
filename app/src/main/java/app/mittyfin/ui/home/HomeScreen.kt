@@ -1,6 +1,7 @@
 package app.mittyfin.ui.home
 
 import app.mittyfin.ui.components.OnReturn
+import app.mittyfin.ui.components.focusHighlight
 import app.mittyfin.ui.components.RefreshBox
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -135,7 +136,7 @@ fun HomeScreen(
                     "Jellyfin", style = MaterialTheme.typography.titleLarge,
                     modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.Center
                 )
-                IconButton(onClick = onOpenSettings) { Icon(Icons.Default.Settings, "Настройки", Modifier.size(28.dp)) }
+                IconButton(onClick = onOpenSettings, modifier = Modifier.focusHighlight(androidx.compose.foundation.shape.CircleShape)) { Icon(Icons.Default.Settings, "Настройки", Modifier.size(28.dp)) }
             }
         }
         vm.error?.let { e -> item { Text("Ошибка: $e", color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp)) } }
@@ -165,13 +166,15 @@ private fun HeroCarousel(items: List<Item>, onOpenItem: (Item) -> Unit) {
     val pager = rememberPagerState { items.size }
     HorizontalPager(
         state = pager,
+        beyondViewportPageCount = 1, // neighbours laid out, so remote Left/Right can focus them
         contentPadding = PaddingValues(start = 16.dp, end = 40.dp),
         pageSpacing = 12.dp,
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
     ) { page ->
         val item = items[page]
         Box(
-            Modifier.fillMaxWidth().height(200.dp).clip(RoundedCornerShape(26.dp)).background(FelColors.Surface)
+            Modifier.fillMaxWidth().height(200.dp).focusHighlight(RoundedCornerShape(26.dp), zoom = 1.02f)
+                .clip(RoundedCornerShape(26.dp)).background(FelColors.Surface)
                 .clickable { onOpenItem(item) }
         ) {
             AsyncImage(

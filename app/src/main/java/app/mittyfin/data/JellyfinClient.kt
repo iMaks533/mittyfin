@@ -5,8 +5,10 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
@@ -171,8 +173,112 @@ class JellyfinClient(private val http: OkHttpClient, private val prefs: Prefs) {
     )
 
     suspend fun item(id: String): Item = get(
-        "/Items/$id", mapOf("userId" to uid, "fields" to "Overview,Genres,MediaSources,MediaStreams,Status,EndDate")
+        "/Items/$id",
+        mapOf("userId" to uid, "fields" to "Overview,Genres,MediaSources,MediaStreams,Status,EndDate,Chapters,Trickplay,People,Taglines,Studios")
     )
+
+    /** Intro / recap / outro / preview segments (Jellyfin 10.10+, e.g. from the Intro Skipper plugin); empty if none. */
+    suspend fun segments(itemId: String): List<MediaSegment> =
+        attempt { get<MediaSegmentsResult>("/MediaSegments/$itemId").items }.getOrDefault(emptyList())
+
+    /** The episode a series' "watch" button starts: next up (resumable included), else the first episode. */
+    suspend fun nextUpFor(seriesId: String): Item? {
+        get<ItemsResult>("/Shows/NextUp", mapOf("userId" to uid, "seriesId" to seriesId, "limit" to 1, "enableResumable" to true,
+            "fields" to "Overview,MediaSources")).items.firstOrNull()?.let { return it }
+        return get<ItemsResult>("/Shows/$seriesId/Episodes", mapOf("userId" to uid, "limit" to 1, "fields" to "Overview,MediaSources")).items.firstOrNull()
+    }
+
+    /** The episode after [episode] in the series order (across seasons), or null at the end of the series. */
+    suspend fun nextEpisode(episode: Item): Item? {
+        val seriesId = episode.seriesId ?: return null
+        val list = get<ItemsResult>(
+            "/Shows/$seriesId/Episodes",
+            mapOf("userId" to uid, "startItemId" to episode.id, "limit" to 2, "fields" to "Overview,MediaSources,MediaStreams")
+        ).items
+        return list.dropWhile { it.id == episode.id }.firstOrNull()?.takeIf { it.id != episode.id }
+    }
+
+    /** Library query: sort, filters, genre / person scoping. */
+    data class Query(
+        val parentId: String? = null,
+        val sortBy: String = "SortName",
+        val descending: Boolean = false,
+        val unplayedOnly: Boolean = false,
+        val favoritesOnly: Boolean = false,
+        val genreId: String? = null,
+        val personId: String? = null,
+        val types: String = "Movie,Series,BoxSet,Video",
+    )
+
+    suspend fun query(q: Query, start: Int, limit: Int): ItemsResult = get(
+        "/Items",
+        mapOf(
+            "userId" to uid, "parentId" to q.parentId, "recursive" to true, "includeItemTypes" to q.types,
+            // A unique tiebreaker after the chosen key keeps offset paging stable.
+            "sortBy" to (if (q.sortBy == "Random") "Random" else "${q.sortBy},SortName,ProductionYear"),
+            "sortOrder" to if (q.descending) "Descending" else "Ascending",
+            "filters" to listOfNotNull(
+                "IsUnplayed".takeIf { q.unplayedOnly }, "IsFavorite".takeIf { q.favoritesOnly }
+            ).joinToString(",").ifEmpty { null },
+            "genreIds" to q.genreId, "personIds" to q.personId,
+            "startIndex" to start, "limit" to limit, "fields" to listFields,
+        )
+    )
+
+    suspend fun genres(parentId: String?): List<NamedId> = get<GenresResult>(
+        "/Genres", mapOf("userId" to uid, "parentId" to parentId, "sortBy" to "SortName")
+    ).items
+
+    /**
+     * Server-side transcode (HLS) for when direct play is not possible or a bitrate limit is set. Text subtitles stay
+     * external; a picked bitmap subtitle is burned in. Returns the stream URL (token in the header, as for direct play)
+     * and the play session id the server expects in progress reports.
+     */
+    suspend fun transcode(
+        itemId: String, mediaSourceId: String, maxBitrate: Long, startMs: Long, audioIndex: Int?, subtitleIndex: Int?,
+    ): Pair<String, String?>? {
+        val s = requireSession()
+        val profile = buildJsonObject {
+            put("MaxStreamingBitrate", maxBitrate)
+            put("MaxStaticBitrate", maxBitrate)
+            put("MusicStreamingTranscodingBitrate", 192_000)
+            putJsonArray("DirectPlayProfiles") { }
+            putJsonArray("TranscodingProfiles") {
+                addJsonObject {
+                    put("Container", "ts"); put("Type", "Video"); put("VideoCodec", "hevc,h264")
+                    put("AudioCodec", "aac,ac3,eac3"); put("Protocol", "hls"); put("Context", "Streaming")
+                    put("MaxAudioChannels", "6"); put("MinSegments", 1); put("BreakOnNonKeyFrames", true)
+                }
+            }
+            putJsonArray("SubtitleProfiles") {
+                for (f in listOf("srt", "subrip", "ass", "ssa", "vtt")) addJsonObject { put("Format", f); put("Method", "External") }
+                for (f in listOf("pgssub", "dvdsub", "dvbsub")) addJsonObject { put("Format", f); put("Method", "Encode") }
+            }
+        }
+        val body = buildJsonObject {
+            put("DeviceProfile", profile)
+            put("MaxStreamingBitrate", maxBitrate)
+            put("StartTimeTicks", startMs * 10_000L)
+            put("MediaSourceId", mediaSourceId)
+            audioIndex?.let { put("AudioStreamIndex", it) }
+            subtitleIndex?.let { put("SubtitleStreamIndex", it) }
+            put("EnableDirectPlay", false)
+            put("EnableDirectStream", false)
+            put("EnableTranscoding", true)
+            put("AutoOpenLiveStream", true)
+        }.toString()
+        val req = Request.Builder().url(url(s.server, "/Items/$itemId/PlaybackInfo", mapOf("userId" to s.userId)))
+            .header("Authorization", authHeader(s.token)).post(body.toRequestBody(jsonType)).build()
+        val info: PlaybackInfoResult = json.decodeFromString(call(req))
+        val path = info.mediaSources.firstOrNull { it.id == mediaSourceId }?.transcodingUrl
+            ?: info.mediaSources.firstOrNull()?.transcodingUrl ?: return null
+        return (s.server + path) to info.playSessionId
+    }
+
+    /** Stops the server's ffmpeg for a transcode session (best effort). */
+    suspend fun stopTranscode(playSessionId: String) {
+        attempt { post("/Videos/ActiveEncodings", query = mapOf("deviceId" to deviceId, "playSessionId" to playSessionId), delete = true) }
+    }
 
     suspend fun similar(id: String): List<Item> =
         get<ItemsResult>("/Items/$id/Similar", mapOf("userId" to uid, "limit" to 16, "fields" to listFields)).items
@@ -214,6 +320,15 @@ class JellyfinClient(private val http: OkHttpClient, private val prefs: Prefs) {
         return url(s.server, "/Items/$itemId/Images/$type", mapOf("maxWidth" to maxWidth, "quality" to 90, "tag" to tag)).toString()
     }
 
+    fun personImageUrl(p: Person, maxWidth: Int = 200): String? =
+        p.primaryImageTag?.let { imageUrl(p.id, "Primary", it, maxWidth) }
+
+    /** One trickplay tile sheet (JPEG with [TrickplayInfo.tileWidth] x [TrickplayInfo.tileHeight] thumbnails). */
+    fun trickplayTileUrl(itemId: String, mediaSourceId: String, width: Int, tile: Int): String? {
+        val s = session ?: return null
+        return url(s.server, "/Videos/$itemId/Trickplay/$width/$tile.jpg", mapOf("mediaSourceId" to mediaSourceId)).toString()
+    }
+
     fun userImageUrl(): String? {
         val s = session ?: return null
         return url(s.server, "/UserImage", mapOf("userId" to s.userId, "maxWidth" to 120)).toString()
@@ -235,7 +350,10 @@ class JellyfinClient(private val http: OkHttpClient, private val prefs: Prefs) {
 
     // --- playback reporting ---
 
-    private fun progressBody(itemId: String, mediaSourceId: String, playSessionId: String, positionMs: Long, paused: Boolean) =
+    private fun progressBody(
+        itemId: String, mediaSourceId: String, playSessionId: String, positionMs: Long, paused: Boolean,
+        method: String = "DirectPlay",
+    ) =
         buildJsonObject {
             put("ItemId", itemId)
             put("MediaSourceId", mediaSourceId)
@@ -243,15 +361,15 @@ class JellyfinClient(private val http: OkHttpClient, private val prefs: Prefs) {
             put("PositionTicks", positionMs * 10_000L)
             put("IsPaused", paused)
             put("CanSeek", true)
-            put("PlayMethod", "DirectPlay")
+            put("PlayMethod", method)
         }.toString()
 
-    suspend fun reportStart(itemId: String, ms: String, ps: String, positionMs: Long) =
-        attempt { post("/Sessions/Playing", progressBody(itemId, ms, ps, positionMs, false)) }
+    suspend fun reportStart(itemId: String, ms: String, ps: String, positionMs: Long, method: String = "DirectPlay") =
+        attempt { post("/Sessions/Playing", progressBody(itemId, ms, ps, positionMs, false, method)) }
 
-    suspend fun reportProgress(itemId: String, ms: String, ps: String, positionMs: Long, paused: Boolean) =
-        attempt { post("/Sessions/Playing/Progress", progressBody(itemId, ms, ps, positionMs, paused)) }
+    suspend fun reportProgress(itemId: String, ms: String, ps: String, positionMs: Long, paused: Boolean, method: String = "DirectPlay") =
+        attempt { post("/Sessions/Playing/Progress", progressBody(itemId, ms, ps, positionMs, paused, method)) }
 
-    suspend fun reportStopped(itemId: String, ms: String, ps: String, positionMs: Long) =
-        attempt { post("/Sessions/Playing/Stopped", progressBody(itemId, ms, ps, positionMs, false)) }
+    suspend fun reportStopped(itemId: String, ms: String, ps: String, positionMs: Long, method: String = "DirectPlay") =
+        attempt { post("/Sessions/Playing/Stopped", progressBody(itemId, ms, ps, positionMs, false, method)) }
 }
