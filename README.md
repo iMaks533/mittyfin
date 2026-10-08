@@ -65,12 +65,45 @@ Mittyfin — компактный клиент медиасервера [Jellyfi
 ## Dolby Vision P7 FEL на GPU
 
 <p align="center">
-  <img src="docs/screenshots/fel-player.webp" width="49%" alt="Тестовый ролик FEL">
-  <img src="docs/screenshots/fel-hud.webp" width="49%" alt="Статистика GPU FEL">
+  <img src="docs/screenshots/fel-hg-el.webp" width="98%" alt="The Hunger Games: Dolby Vision P7 FEL через GPU">
 </p>
-<p align="center"><sub>Слева — тестовый ролик: надпись «THIS DEVICE CAN DECODE FEL» проступает, только если слой улучшения действительно применён.
-Справа — панель статистики: <code>DV7 FEL · GPU FEL</code>, <code>FEL ✓</code>, кадр на GPU за 11 мс.
-Скриншоты HDR-кадров сняты системой в SDR, на экране картинка ярче и контрастнее.</sub></p>
+<p align="center"><sub>The Hunger Games (UHD Blu-ray, Dolby Vision profile 7 FEL) на OPPO Find X9 Pro: база + RPU + слой улучшения, собранные на GPU.</sub></p>
+
+### Как увидеть, что FEL работает
+
+**Тестовый ролик.** Надпись «THIS DEVICE CAN DECODE FEL» записана только в слое улучшения. Если EL
+применён, она проступает поверх кадра (вживую мерцает). Если плеер выбросил EL — её нет.
+Режим отображения переключается тапом по панели «Информация о медиа»: «BL + RPU + EL» → «without EL» → «EL residual ×32».
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/fel-test-el.webp" alt="С EL"><br><sub><b>С EL</b> — надпись видна</sub></td>
+    <td align="center"><img src="docs/screenshots/fel-test-no-el.webp" alt="Без EL"><br><sub><b>Без EL</b> — надписи нет</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/fel-test-hud-el.webp" alt="Статистика: BL + RPU + EL"><br><sub>Статистика: <code>DV7 FEL · GPU FEL</code>, <code>FEL ✓</code>, вид <code>BL + RPU + EL</code></sub></td>
+    <td align="center"><img src="docs/screenshots/fel-test-hud-no-el.webp" alt="Статистика: without EL"><br><sub>Тот же кадр в режиме <code>without EL</code></sub></td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2"><img src="docs/screenshots/fel-test-residual.webp" width="49%" alt="Остаток EL ×32"><br><sub><code>EL residual ×32</code> — сам слой улучшения, усиленный в 32 раза</sub></td>
+  </tr>
+</table>
+
+**Настоящий фильм.** В кино слой улучшения несёт не надписи, а мелкие детали, текстуры и
+точность градаций. Глазом A/B на телефоне различается тонко, поэтому видно его в режиме остатка:
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/fel-hg-hud-el.webp" alt="The Hunger Games: BL + RPU + EL"><br><sub><code>BL + RPU + EL</code>: 3840×2160, 23.976 fps, 90 Мбит/с, <code>FEL ✓</code>, кадр на GPU 12,7 мс, 0 пропусков</sub></td>
+    <td align="center"><img src="docs/screenshots/fel-hg-hud-no-el.webp" alt="The Hunger Games: without EL"><br><sub>Тот же кадр <code>without EL</code></sub></td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2"><img src="docs/screenshots/fel-hg-residual.webp" width="49%" alt="The Hunger Games: остаток EL ×32"><br><sub><code>EL residual ×32</code>: контуры зданий, моста и гор — то, что FEL добавляет к базовому слою</sub></td>
+  </tr>
+</table>
+
+> Скриншоты HDR-кадров система сохраняет в SDR: яркие насыщенные цвета упираются в предел, и часть
+> разницы теряется. На самом экране картинка ярче и контрастнее, а мерцание тестовой надписи видно только вживую.
 
 ### Зачем это нужно
 
