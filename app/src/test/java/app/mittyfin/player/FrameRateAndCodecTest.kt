@@ -51,6 +51,7 @@ class CodecNameTest {
     @Test fun commonAudioCodecsGetReadableNames() {
         assertEquals("TrueHD", codecName("audio/true-hd", null))
         assertEquals("DTS-HD", codecName("audio/vnd.dts.hd", null))
+        assertEquals("DTS", codecName("audio/vnd.dts", null))
         assertEquals("E-AC3", codecName("audio/eac3", null))
         assertEquals("AAC", codecName("audio/mp4a-latm", "mp4a.40.2"))
     }

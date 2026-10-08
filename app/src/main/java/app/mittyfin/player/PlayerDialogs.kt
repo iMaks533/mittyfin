@@ -453,7 +453,7 @@ internal fun StatsPanel(activity: PlayerActivity, modifier: Modifier) {
         if (dv != null) add("Вид" to "${GpuFelStatus.debugView.label} (тап — переключить)")
         GpuFelStatus.lastFallbackReason?.let { add("Откат" to it) }
         if (dv == null && GpuFelSupport.unavailableReason() != null) add("GPU FEL" to "недоступно: ${GpuFelSupport.unavailableReason()}")
-        p?.audioFormat?.let { a -> add("Звук" to "${a.sampleMimeType?.substringAfter('/')} · ${a.channelCount}ch · ${a.sampleRate} Гц") }
+        p?.audioFormat?.let { a -> add("Звук" to "${codecName(a.sampleMimeType, a.codecs)} · ${a.channelCount}ch · ${a.sampleRate} Гц") }
     }
     Column(
         modifier.widthIn(max = 560.dp).clip(RoundedCornerShape(14.dp)).background(Color(0xCC0B0F18))
