@@ -209,16 +209,17 @@ object AudioRoute {
 }
 
 /**
- * Display mode with a refresh that is a whole multiple of the content frame rate (23.976 fps -> 120 Hz), at the
- * active resolution, lowest such refresh >= 48 Hz; null when none fits. See the NuvioTV-Fork VideoRefreshPin.
+ * Display mode with a refresh that is a whole multiple of the content frame rate, at the active resolution: the
+ * lowest such refresh >= [minHz]; null when none fits. Phones: >= 48 Hz (23.976 fps -> 120 Hz, a seamless switch).
+ * TVs: the film's own rate (23.976 -> 23.976 Hz HDMI mode, a real frame-rate match; the TV blanks for a moment).
  */
 object RefreshPin {
-    fun choose(display: Display, fps: Float): Display.Mode? {
+    fun choose(display: Display, fps: Float, minHz: Float = 48f): Display.Mode? {
         if (!(fps > 1f)) return null
         val active = display.mode
         return display.supportedModes
             .filter { it.physicalWidth == active.physicalWidth && it.physicalHeight == active.physicalHeight }
-            .filter { it.refreshRate >= 48f && isWholeMultiple(it.refreshRate, fps) }
+            .filter { it.refreshRate >= minHz && isWholeMultiple(it.refreshRate, fps) }
             .minByOrNull { it.refreshRate }
     }
 

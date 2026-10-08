@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -100,16 +101,7 @@ fun SeekBar(
     BoxWithConstraints(modifier) {
         val widthPx = constraints.maxWidth.toFloat().coerceAtLeast(1f)
         val density = LocalDensity.current
-        Column {
-            // Preview above the bar, centred on the scrub position.
-            Box(Modifier.fillMaxWidth().height(if (scrubbing) 132.dp else 0.dp)) {
-                if (scrubbing) {
-                    val previewWidth = 200.dp
-                    val pw = with(density) { previewWidth.toPx() }
-                    val x = (scrubMs.toFloat() / duration * widthPx - pw / 2).coerceIn(0f, widthPx - pw)
-                    PreviewBubble(preview, scrubMs, chapters, Modifier.offset { IntOffset(x.roundToInt(), 0) }.width(previewWidth))
-                }
-            }
+        Box {
             Canvas(
                 Modifier.fillMaxWidth().height(34.dp)
                     .onFocusChanged { focused = it.isFocused; if (!it.isFocused && scrubbing) { commitJob?.cancel(); onSeek(scrubMs); scrubbing = false } }
@@ -161,6 +153,17 @@ fun SeekBar(
                 val thumb = if (focused || scrubbing) 11.dp.toPx() else 8.dp.toPx()
                 drawCircle(if (focused) FelColors.Accent else Color.White, thumb, Offset(played, size.height / 2))
                 if (focused) drawCircle(Color.White, thumb, Offset(played, size.height / 2), style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx()))
+            }
+            // Preview floating above the bar (outside its bounds, so the controls do not move), centred on the position.
+            if (scrubbing) {
+                val previewWidth = 200.dp
+                val pw = with(density) { previewWidth.toPx() }
+                val x = (scrubMs.toFloat() / duration * widthPx - pw / 2).coerceIn(0f, (widthPx - pw).coerceAtLeast(0f))
+                PreviewBubble(
+                    preview, scrubMs, chapters,
+                    Modifier.align(Alignment.BottomStart).offset { IntOffset(x.roundToInt(), -with(density) { 40.dp.roundToPx() }) }
+                        .width(previewWidth).wrapContentHeight(Alignment.Bottom, unbounded = true)
+                )
             }
         }
     }

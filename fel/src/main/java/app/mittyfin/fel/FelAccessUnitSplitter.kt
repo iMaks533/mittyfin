@@ -134,14 +134,19 @@ internal class FelAccessUnitSplitter {
         if (type < NAL_VPS || type > NAL_PPS) return false
         val slot = type - NAL_VPS
         val last = sent[slot]
-        if (last != null && last.size == end - begin &&
-            java.util.Arrays.equals(last, 0, last.size, input, begin, end)
-        ) {
+        if (last != null && sameBytes(last, input, begin, end)) {
             droppedParameterSets++
             return true
         }
         sent[slot] = input.copyOfRange(begin, end)
         return false
+    }
+
+    /** last == src[begin, end). (Arrays.equals with ranges is API 33; this runs from Android 10.) */
+    private fun sameBytes(last: ByteArray, src: ByteArray, begin: Int, end: Int): Boolean {
+        if (last.size != end - begin) return false
+        for (i in last.indices) if (last[i] != src[begin + i]) return false
+        return true
     }
 
     private fun rememberElParameterSet(src: ByteArray, begin: Int, end: Int) {

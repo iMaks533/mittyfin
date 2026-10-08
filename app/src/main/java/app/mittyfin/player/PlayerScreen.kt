@@ -272,7 +272,8 @@ fun PlayerScreen(activity: PlayerActivity) {
 
         // Skip intro / recap / credits: shown with or without the controls.
         ui.skipSegment?.let { seg ->
-            if (!locked && sheet == Sheet.NONE) SkipButton(
+            // Under the up-next card the credits button is redundant (the card's "Смотреть" skips them).
+            if (!locked && sheet == Sheet.NONE && !ui.upNextShown) SkipButton(
                 SeriesFlow.skipLabels[seg.type] ?: "Пропустить", tv,
                 Modifier.align(Alignment.BottomEnd).padding(end = 28.dp, bottom = if (controls) 120.dp else 40.dp)
             ) { activity.skipSegment(); touch() }

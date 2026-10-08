@@ -418,8 +418,21 @@ internal class FelGlComposer(
     }
 
     /** (Re)allocates the plane textures (and, for the BL, the composed slots) when the picture size changes. */
+    private var layoutLogged = false
+
     private fun ensurePlaneTextures(image: Image, isBl: Boolean) {
-        check(image.format == FORMAT_YCBCR_P010) { "decoder output is not P010 (format 0x${Integer.toHexString(image.format)})" }
+        if (!layoutLogged) {
+            layoutLogged = true
+            val p = image.planes
+            val y0 = p[0].buffer.let { b -> if (b.remaining() >= 2) (b.get(b.position()).toInt() and 0xFF) or ((b.get(b.position() + 1).toInt() and 0xFF) shl 8) else -1 }
+            Log.i(TAG, "decoder image: format=0x${Integer.toHexString(image.format)} planes=${p.size} " +
+                p.joinToString { "px${it.pixelStride}/row${it.rowStride}" } + " firstY=0x${Integer.toHexString(y0)}")
+        }
+        // Before Android 12 a P010 output Image may report the flexible YUV_420_888 format: the layout (16-bit
+        // samples, interleaved CbCr) is what matters, and uploadP010 checks that.
+        check(image.format == FORMAT_YCBCR_P010 || (image.format == FORMAT_YUV_420_888 && image.planes[0].pixelStride == 2)) {
+            "decoder output is not P010 (format 0x${Integer.toHexString(image.format)}, Y pixel stride ${image.planes[0].pixelStride})"
+        }
         val crop = image.cropRect
         val w = crop.width() and 1.inv()
         val h = crop.height() and 1.inv()
@@ -895,6 +908,7 @@ internal class FelGlComposer(
         private const val TEX_EL_UV = 3
         /** ImageFormat.YCBCR_P010 (API 31 constant; the value is what MediaCodec reports on API 29+). */
         private const val FORMAT_YCBCR_P010 = 0x36
+        private const val FORMAT_YUV_420_888 = 0x23
 
         private const val EGL_OPENGL_ES3_BIT_KHR = 0x40
         private const val EGL_GL_COLORSPACE_KHR = 0x309D

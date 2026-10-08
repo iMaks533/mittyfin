@@ -6,6 +6,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
+import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -49,6 +54,7 @@ import app.mittyfin.data.Item
 import app.mittyfin.data.JellyfinClient
 import app.mittyfin.ui.settings.SettingsScreen
 import app.mittyfin.ui.components.focusHighlight
+import app.mittyfin.ui.components.isTv
 import app.mittyfin.fel.GpuFelSupport
 import app.mittyfin.player.PlayerActivity
 import app.mittyfin.ui.details.DetailsScreen
@@ -136,7 +142,13 @@ private fun App(onPlay: (PlayRequest) -> Unit) {
         }
     }
 
-    Box(Modifier.fillMaxSize()) {
+    // Phone / tablet: a floating pill at the bottom. Android TV: a vertical rail on the left (remote "left" from any
+    // screen reaches it, "right" goes back into the content), with settings in it too.
+    val tv = isTv()
+    val showNav = route != null && route != Routes.LOGIN && route != Routes.LOADING && (tv || route != Routes.SETTINGS)
+    Row(Modifier.fillMaxSize()) {
+    if (tv && showNav && route != null) NavRail(route, nav)
+    Box(Modifier.weight(1f).fillMaxHeight()) {
         NavHost(nav, startDestination = Routes.LOADING) {
             composable(Routes.LOADING) {
                 LaunchedEffect(Unit) {
@@ -182,9 +194,8 @@ private fun App(onPlay: (PlayRequest) -> Unit) {
                     onOpenGenre = { nav.navigate(Routes.genre(it.id, it.name)) })
             }
         }
-        if (route != null && route != Routes.LOGIN && route != Routes.LOADING && route != Routes.SETTINGS) {
-            BottomPill(route, nav, Modifier.align(Alignment.BottomCenter))
-        }
+        if (!tv && showNav && route != null) BottomPill(route, nav, Modifier.align(Alignment.BottomCenter))
+    }
     }
 }
 
@@ -219,3 +230,46 @@ private fun PillButton(icon: androidx.compose.ui.graphics.vector.ImageVector, la
     }
 }
 
+
+/** Android TV navigation: icons with labels in a left column, like Yamby's TV layout. */
+@Composable
+private fun NavRail(route: String, nav: NavHostController) {
+    fun go(target: String) {
+        if (route == target) return
+        nav.navigate(target) {
+            popUpTo(Routes.HOME) { saveState = true }
+            launchSingleTop = true
+            restoreState = true
+        }
+    }
+    Column(
+        Modifier.fillMaxHeight().width(96.dp).background(Color(0xFF0C1018)).padding(vertical = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        val jf = MittyfinApp.instance.jellyfin
+        coil3.compose.AsyncImage(
+            model = jf.userImageUrl(), contentDescription = jf.session?.userName,
+            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+            modifier = Modifier.padding(bottom = 14.dp).size(48.dp).clip(CircleShape).background(FelColors.SurfaceHigh)
+        )
+        RailButton(Icons.Default.Home, "Главная", route == Routes.HOME) { go(Routes.HOME) }
+        RailButton(Icons.Default.Search, "Поиск", route == Routes.SEARCH) { go(Routes.SEARCH) }
+        RailButton(Icons.Outlined.StarOutline, "Избранное", route == Routes.FAVORITES) { go(Routes.FAVORITES) }
+        androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
+        RailButton(Icons.Default.Settings, "Настройки", route == Routes.SETTINGS) { go(Routes.SETTINGS) }
+    }
+}
+
+@Composable
+private fun RailButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, selected: Boolean, onClick: () -> Unit) {
+    Column(
+        Modifier.width(80.dp).focusHighlight(RoundedCornerShape(14.dp)).clip(RoundedCornerShape(14.dp))
+            .background(if (selected) FelColors.Badge else Color.Transparent)
+            .clickable(onClick = onClick).padding(vertical = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Icon(icon, label, Modifier.size(28.dp), tint = if (selected) FelColors.OnChip else Color.White)
+        Text(label, fontSize = 11.sp, color = if (selected) FelColors.OnChip else Color.White.copy(alpha = 0.8f), maxLines = 1)
+    }
+}

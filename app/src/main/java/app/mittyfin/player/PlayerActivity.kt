@@ -904,7 +904,8 @@ class PlayerActivity : ComponentActivity() {
         val fps = player?.videoFormat?.frameRate ?: return
         if (fps <= 1f || kotlin.math.abs(fps - pinnedForFps) < 0.01f) return
         val display = window.decorView.display ?: return
-        val mode = RefreshPin.choose(display, fps) ?: return
+        val tv = packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_LEANBACK)
+        val mode = RefreshPin.choose(display, fps, minHz = if (tv) 23f else 48f) ?: return
         pinnedForFps = fps
         window.attributes = window.attributes.apply { preferredDisplayModeId = mode.modeId }
         Log.i(TAG, "pin display mode ${mode.modeId} (${mode.refreshRate} Hz) for $fps fps")

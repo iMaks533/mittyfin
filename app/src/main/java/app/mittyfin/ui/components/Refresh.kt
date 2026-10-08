@@ -16,6 +16,12 @@ import androidx.lifecycle.LifecycleEventObserver
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RefreshBox(refreshing: Boolean, onRefresh: () -> Unit, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    // A remote has no "pull": focus scrolling at the top of a list would start a pull that is never released.
+    // Screens refresh on return anyway (OnReturn).
+    if (isTv()) {
+        androidx.compose.foundation.layout.Box(modifier.fillMaxSize()) { content() }
+        return
+    }
     PullToRefreshBox(isRefreshing = refreshing, onRefresh = onRefresh, modifier = modifier.fillMaxSize()) { content() }
 }
 

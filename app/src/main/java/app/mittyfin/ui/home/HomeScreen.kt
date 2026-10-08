@@ -121,8 +121,10 @@ fun HomeScreen(
         return
     }
     RefreshBox(vm.refreshing, { vm.refresh(pulled = true) }) {
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 110.dp)) {
-        item {
+    val tv = app.mittyfin.ui.components.isTv()
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = if (tv) 20.dp else 0.dp, bottom = 110.dp)) {
+        // TV: the avatar and settings are in the navigation rail, no header row.
+        if (!tv) item {
             Row(
                 Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically

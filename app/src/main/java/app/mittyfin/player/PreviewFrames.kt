@@ -76,12 +76,26 @@ class PreviewFrames(
                 runCatching {
                     val r = retriever ?: MediaMetadataRetriever().also { it.setDataSource(url, headers); retriever = it }
                     r.getScaledFrameAtTime(bucket * GRAB_BUCKET_MS * 1000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 320, 180)
+                        ?.also { frame ->
+                            // HDR10 / Dolby Vision 10-bit files come back black from the platform frame grabber on
+                            // some SoCs (MediaTek): no use showing an empty box for every preview.
+                            if (isBlack(frame)) throw IllegalStateException("frame grabber returns black frames for this file")
+                        }
                 }.onFailure {
                     Log.i("Mittyfin", "preview frames unavailable: ${it.message}")
                     retrieverFailed = true
                 }.getOrNull()
             }?.also { grabbed.put(bucket, it) }
         }
+    }
+
+    private fun isBlack(b: Bitmap): Boolean {
+        var max = 0
+        for (yi in 1..7) for (xi in 1..7) {
+            val c = b.getPixel(b.width * xi / 8, b.height * yi / 8)
+            max = maxOf(max, (c shr 16) and 0xFF, (c shr 8) and 0xFF, c and 0xFF)
+        }
+        return max < 12
     }
 
     fun release() {

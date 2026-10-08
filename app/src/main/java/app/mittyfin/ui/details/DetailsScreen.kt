@@ -70,6 +70,7 @@ import androidx.compose.ui.focus.focusRequester
 import app.mittyfin.data.NamedId
 import app.mittyfin.data.Person
 import app.mittyfin.ui.components.focusHighlight
+import app.mittyfin.ui.components.backdropUrl
 import app.mittyfin.ui.components.isTv
 import app.mittyfin.data.attempt
 import app.mittyfin.ui.components.OnReturn
@@ -275,16 +276,31 @@ fun DetailsScreen(
 @Composable
 private fun Header(item: Item, vm: DetailsViewModel, onBack: () -> Unit) {
     val landscape = item.isEpisode
-    Box(Modifier.fillMaxWidth().then(if (landscape) Modifier.aspectRatio(16f / 10f) else Modifier.aspectRatio(2f / 3.1f))) {
+    // TV, tablet or phone in landscape: a portrait poster across the full width would be screens tall. Use the
+    // backdrop at ~60 % of the screen height instead, with the text over its darkened left side.
+    val config = androidx.compose.ui.platform.LocalConfiguration.current
+    val wide = config.screenWidthDp > config.screenHeightDp && config.screenWidthDp >= 600
+    val size = when {
+        wide -> Modifier.height((config.screenHeightDp * 0.62f).dp)
+        landscape -> Modifier.aspectRatio(16f / 10f)
+        else -> Modifier.aspectRatio(2f / 3.1f)
+    }
+    Box(Modifier.fillMaxWidth().then(size)) {
         AsyncImage(
-            model = if (landscape) landscapeUrl(item, 1280) else posterUrl(item, 1000), contentDescription = item.name,
-            contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()
+            model = when {
+                landscape -> landscapeUrl(item, if (wide) 1920 else 1280)
+                wide -> backdropUrl(item, 1920) ?: posterUrl(item, 1000)
+                else -> posterUrl(item, 1000)
+            },
+            contentDescription = item.name, contentScale = ContentScale.Crop, alignment = Alignment.TopCenter,
+            modifier = Modifier.fillMaxSize()
         )
         Box(
             Modifier.fillMaxSize().background(
                 Brush.verticalGradient(0.45f to Color.Transparent, 1f to FelColors.Background)
             )
         )
+        if (wide) Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to FelColors.Background.copy(alpha = 0.85f), 0.55f to Color.Transparent)))
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack, modifier = Modifier.focusHighlight(CircleShape)) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад", tint = Color.White) }
             Spacer(Modifier.weight(1f))

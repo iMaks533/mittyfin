@@ -320,7 +320,7 @@ class GpuFelVideoRenderer(
             .getOrElse { throw fallback("cannot create $name: ${it.message}") }
         try {
             val mf = MediaFormat.createVideoFormat(MimeTypes.VIDEO_H265, width, height)
-            mf.setInteger(MediaFormat.KEY_COLOR_FORMAT, GpuFelSupport.COLOR_FORMAT_YUV_P010)
+            mf.setInteger(MediaFormat.KEY_COLOR_FORMAT, GpuFelSupport.outputColorFormat)
             mf.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, maxInputSize)
             mf.setInteger(MediaFormat.KEY_PRIORITY, 0) // realtime
             if (frameRate > 0f) mf.setFloat(MediaFormat.KEY_FRAME_RATE, frameRate)
@@ -487,7 +487,8 @@ class GpuFelVideoRenderer(
     private fun onOutputFormatChanged(format: MediaFormat, isBl: Boolean) {
         val colorFormat = if (format.containsKey(MediaFormat.KEY_COLOR_FORMAT)) format.getInteger(MediaFormat.KEY_COLOR_FORMAT) else -1
         Log.i(TAG, "${if (isBl) "BL" else "EL"} output format: $format")
-        if (colorFormat != GpuFelSupport.COLOR_FORMAT_YUV_P010) {
+        // Flexible output is accepted here; whether its planes are really 16-bit P010 is checked per frame.
+        if (colorFormat != GpuFelSupport.COLOR_FORMAT_YUV_P010 && GpuFelSupport.outputColorFormat != GpuFelSupport.COLOR_FORMAT_FLEXIBLE) {
             throw fallback("${if (isBl) "BL" else "EL"} decoder outputs color format $colorFormat, not P010")
         }
         if (isBl) blOutputFormatSeen = true else elOutputFormatSeen = true

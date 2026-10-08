@@ -52,7 +52,8 @@ class GpuFelSupportTest {
 
     @Test
     fun reasonCoversPlatformAndBridge() {
-        assertEquals("needs Android 13+ (API 32)", GpuFelSupport.unavailableReason(32, true, listOf(candidate())))
+        assertEquals("needs Android 10+ (API 28)", GpuFelSupport.unavailableReason(28, true, listOf(candidate())))
+        assertEquals(null, GpuFelSupport.unavailableReason(30, true, listOf(candidate()))) // Shield, Android 11
         assertEquals("libdovi bridge not loaded", GpuFelSupport.unavailableReason(34, false, listOf(candidate())))
         assertEquals("no hardware HEVC decoder", GpuFelSupport.unavailableReason(34, true, emptyList()))
         assertNull(GpuFelSupport.unavailableReason(34, true, listOf(candidate())))
