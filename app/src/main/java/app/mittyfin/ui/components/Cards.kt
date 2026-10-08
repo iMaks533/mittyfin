@@ -29,7 +29,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.layout.ContentScale
@@ -213,11 +212,7 @@ fun LibraryCard(view: Item, onClick: () -> Unit, width: Dp = 168.dp) {
                 model = jf.imageUrl(view.id, "Primary", view.imageTags["Primary"], 640), contentDescription = view.name,
                 contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()
             )
-            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0x33000000), Color(0x66000000)))))
-            Text(
-                view.name, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold,
-                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.align(Alignment.Center).padding(horizontal = 8.dp)
-            )
+            // Jellyfin renders the library name into the image itself; the name is only repeated below it.
         }
         Spacer(Modifier.height(6.dp))
         Text(view.name, style = MaterialTheme.typography.titleMedium, maxLines = 1)

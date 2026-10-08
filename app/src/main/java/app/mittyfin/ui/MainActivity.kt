@@ -66,7 +66,9 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             MittyfinTheme {
-                Box(Modifier.fillMaxSize().background(FelColors.Background)) { App(::startPlayer) }
+                // Surface sets the content colour too: plain Text inherits light-on-dark from it.
+                androidx.compose.material3.Surface(color = FelColors.Background, contentColor = FelColors.TextPrimary,
+                    modifier = Modifier.fillMaxSize()) { App(::startPlayer) }
             }
         }
     }
