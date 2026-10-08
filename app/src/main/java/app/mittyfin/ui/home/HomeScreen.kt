@@ -1,5 +1,7 @@
 package app.mittyfin.ui.home
 
+import app.mittyfin.ui.components.OnReturn
+import app.mittyfin.ui.components.RefreshBox
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -63,6 +65,7 @@ import kotlinx.coroutines.launch
 class HomeViewModel : ViewModel() {
     private val jf = MittyfinApp.instance.jellyfin
     var loading by mutableStateOf(true)
+    var refreshing by mutableStateOf(false)
     var error by mutableStateOf<String?>(null)
     var featured by mutableStateOf<List<Item>>(emptyList())
     var views by mutableStateOf<List<Item>>(emptyList())
@@ -72,7 +75,9 @@ class HomeViewModel : ViewModel() {
 
     init { refresh() }
 
-    fun refresh() {
+    fun refresh(pulled: Boolean = false) {
+        if (refreshing) return
+        refreshing = pulled
         viewModelScope.launch {
             error = null
             runCatching {
@@ -91,6 +96,7 @@ class HomeViewModel : ViewModel() {
                     .filter { it.second.isNotEmpty() }
             }.onFailure { error = it.message }
             loading = false
+            refreshing = false
         }
     }
 }
@@ -103,11 +109,13 @@ fun HomeScreen(
     vm: HomeViewModel = viewModel(),
 ) {
     LaunchedEffect(Unit) { if (!vm.loading) vm.refresh() }
+    OnReturn { vm.refresh() }
     val session = MittyfinApp.instance.jellyfin.session
     if (vm.loading) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         return
     }
+    RefreshBox(vm.refreshing, { vm.refresh(pulled = true) }) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 110.dp)) {
         item {
             Row(
@@ -144,6 +152,7 @@ fun HomeScreen(
             SectionHeader(view.name, onMore = { onOpenLibrary(view) })
             CardRow(list) { PosterCard(it, onClick = { onOpenItem(it) }) }
         }
+    }
     }
 }
 

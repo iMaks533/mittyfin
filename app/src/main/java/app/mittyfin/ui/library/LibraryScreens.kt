@@ -40,7 +40,9 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.mittyfin.MittyfinApp
 import app.mittyfin.data.Item
+import app.mittyfin.ui.components.OnReturn
 import app.mittyfin.ui.components.PosterCard
+import app.mittyfin.ui.components.RefreshBox
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -52,6 +54,7 @@ class LibraryViewModel(private val parentId: String) : ViewModel() {
     var items by mutableStateOf<List<Item>>(emptyList())
     var total by mutableStateOf(Int.MAX_VALUE)
     var loading by mutableStateOf(false)
+    var refreshing by mutableStateOf(false)
 
     init { loadMore() }
 
@@ -65,6 +68,22 @@ class LibraryViewModel(private val parentId: String) : ViewModel() {
                     total = r.total
                 }
             loading = false
+        }
+    }
+
+    /** Reloads the pages already shown, so new items and watched marks appear in place. */
+    fun reload(pulled: Boolean = false) {
+        if (loading) return
+        loading = true
+        refreshing = pulled
+        viewModelScope.launch {
+            runCatching { jf.items(parentId, 0, maxOf(items.size, PAGE), "Movie,Series,BoxSet,Video") }
+                .onSuccess { r ->
+                    items = r.items
+                    total = r.total
+                }
+            loading = false
+            refreshing = false
         }
     }
 }
@@ -90,12 +109,13 @@ fun LibraryScreen(parentId: String, title: String, onBack: () -> Unit, onOpenIte
     val state = rememberLazyGridState()
     val nearEnd by remember { derivedStateOf { (state.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) > vm.items.size - 20 } }
     LaunchedEffect(nearEnd) { if (nearEnd) vm.loadMore() }
+    OnReturn { vm.reload() }
     Column(Modifier.fillMaxSize()) {
         TopBar(title, onBack)
         if (vm.items.isEmpty() && vm.loading) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         } else {
-            PosterGrid(vm.items, onOpenItem, state)
+            RefreshBox(vm.refreshing, { vm.reload(pulled = true) }) { PosterGrid(vm.items, onOpenItem, state) }
         }
     }
 }
@@ -146,10 +166,13 @@ fun SearchScreen(onOpenItem: (Item) -> Unit, vm: SearchViewModel = viewModel()) 
 class FavoritesViewModel : ViewModel() {
     var items by mutableStateOf<List<Item>>(emptyList())
     var loading by mutableStateOf(true)
-    fun refresh() {
+    var refreshing by mutableStateOf(false)
+    fun refresh(pulled: Boolean = false) {
+        refreshing = pulled
         viewModelScope.launch {
             items = runCatching { MittyfinApp.instance.jellyfin.favorites() }.getOrDefault(emptyList())
             loading = false
+            refreshing = false
         }
     }
 }
@@ -157,8 +180,11 @@ class FavoritesViewModel : ViewModel() {
 @Composable
 fun FavoritesScreen(onOpenItem: (Item) -> Unit, vm: FavoritesViewModel = viewModel()) {
     LaunchedEffect(Unit) { vm.refresh() }
+    OnReturn { vm.refresh() }
     Column(Modifier.fillMaxSize()) {
         TopBar("Избранное", null)
+        RefreshBox(vm.refreshing, { vm.refresh(pulled = true) }) {
+        Column(Modifier.fillMaxSize()) {
         if (!vm.loading && vm.items.isEmpty()) {
             Text(
                 "Здесь будут фильмы и сериалы, отмеченные сердечком.",
@@ -166,5 +192,7 @@ fun FavoritesScreen(onOpenItem: (Item) -> Unit, vm: FavoritesViewModel = viewMod
             )
         }
         PosterGrid(vm.items, onOpenItem)
+        }
+        }
     }
 }

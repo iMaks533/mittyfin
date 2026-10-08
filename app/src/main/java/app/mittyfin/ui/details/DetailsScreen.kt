@@ -64,6 +64,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.mittyfin.MittyfinApp
+import app.mittyfin.ui.components.OnReturn
+import app.mittyfin.ui.components.RefreshBox
 import app.mittyfin.data.Item
 import app.mittyfin.data.MediaSource
 import app.mittyfin.data.MediaStream
@@ -99,10 +101,13 @@ class DetailsViewModel(private val itemId: String) : ViewModel() {
     var similar by mutableStateOf<List<Item>>(emptyList())
     var audioIndex by mutableStateOf<Int?>(null)
     var subtitleIndex by mutableStateOf<Int?>(null) // -1 = off
+    var refreshing by mutableStateOf(false)
 
     init { load() }
 
-    fun load() {
+    fun load(pulled: Boolean = false) {
+        if (refreshing) return
+        refreshing = pulled
         viewModelScope.launch {
             runCatching {
                 val it = jf.item(itemId)
@@ -112,11 +117,13 @@ class DetailsViewModel(private val itemId: String) : ViewModel() {
                 if (subtitleIndex == null) subtitleIndex = ms?.defaultSubtitleStreamIndex ?: -1
                 if (it.isSeries) {
                     seasons = jf.seasons(it.id)
-                    val pick = seasons.firstOrNull { s -> s.userData?.played == false } ?: seasons.firstOrNull()
+                    val pick = seasons.firstOrNull { s -> s.id == selectedSeason?.id }
+                        ?: seasons.firstOrNull { s -> s.userData?.played == false } ?: seasons.firstOrNull()
                     pick?.let { s -> selectSeason(s) }
                 }
                 similar = runCatching { jf.similar(itemId) }.getOrDefault(emptyList())
             }.onFailure { error = it.message }
+            refreshing = false
         }
     }
 
@@ -164,6 +171,8 @@ fun DetailsScreen(
         }
         return
     }
+    OnReturn { vm.load() }
+    RefreshBox(vm.refreshing, { vm.load(pulled = true) }) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 110.dp)) {
         item { Header(item, vm, onBack) }
         if (!item.isSeries) {
@@ -194,6 +203,7 @@ fun DetailsScreen(
             item { SectionHeader("Похожие") }
             item { CardRow(vm.similar) { PosterCard(it, onClick = { onOpenItem(it) }) } }
         }
+    }
     }
 }
 
