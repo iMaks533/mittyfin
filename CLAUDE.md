@@ -29,9 +29,8 @@ profile 7 FEL, собираемый на GPU из двух аппаратных 
   оставляет старый файл. Вывод Gradle не обрезать `Select-Object -First` / `head`: сборка
   продолжает работать без консоли и блокирует следующую (`Could not delete ...build\tmp`).
   Писать лог в файл и смотреть хвост.
-- adb: `C:/Android/sdk/platform-tools/adb.exe`. Телефон `3B15A300AGJ00000` (USB), Shield
-  `192.168.1.20:5555` (по сети, `adb connect`). Первая установка нового пакета требует
-  подтверждения на экране; заблокированный экран = ничего не проверить, попросить разблокировать.
+- adb: `C:/Android/sdk/platform-tools/adb.exe`. Телефон `3B15A300AGJ00000` (USB). Первая
+  установка нового пакета требует подтверждения на экране; заблокированный экран = ничего не проверить, попросить разблокировать.
 - Запуск без касаний (debug-сборки): `adb shell am start -S -n app.mittyfin/.ui.MainActivity
   --es debug_play <itemId> [--el debug_start_ms N] [--ei debug_sub <index>] [--ez debug_no_gpufel true]`.
 - Проверка = доказательство: строки logcat (`GpuFel`, `GpuFelGl`, `Mittyfin`), цифры
