@@ -5,3 +5,4 @@ local.properties
 *.iml
 .cxx/
 .kotlin/
+CLAUDE.local.md
